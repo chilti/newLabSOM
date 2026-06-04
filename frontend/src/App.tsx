@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSomStore } from './store/somStore';
 import { RedBibliometrica } from './components/RedBibliometrica';
 import { ExploradorDatos } from './components/ExploradorDatos';
-import { Database, Share2, Sliders, ArrowRight, RefreshCw, ChevronLeft, ChevronRight, FolderOpen, Settings, Upload } from 'lucide-react';
+import { Database, Share2, Sliders, ArrowRight, RefreshCw, ChevronLeft, ChevronRight, Settings, Upload } from 'lucide-react';
 
 export default function App() {
   const { 

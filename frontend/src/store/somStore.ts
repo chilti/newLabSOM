@@ -2,6 +2,23 @@ import { create } from 'zustand';
 import { type NormalizationInfo, type NormalizationType, applyNormalizationToMatrix } from '../utils/normalization';
 import { applyCmaSmoothing } from '../utils/timeSeries';
 
+// Helper to resolve API URLs dynamically based on deployment environment
+const getApiUrl = (path: string): string => {
+  // 1. Desktop context (Photino loads local index.html using file:// or app://)
+  const isDesktop = window.location.protocol === 'file:' || window.location.protocol === 'about:' || !window.location.host;
+  if (isDesktop) {
+    return `http://localhost:5123${path}`;
+  }
+  
+  // 2. Production browser context served under a subdirectory path (e.g., /labsom/)
+  if (window.location.pathname.startsWith('/labsom')) {
+    return `/labsom${path}`;
+  }
+  
+  // 3. Standard relative API calls (Development or domain-root deployment)
+  return path;
+};
+
 export interface SOMConfig {
   rows: number;
   cols: number;
@@ -290,7 +307,7 @@ export const useSomStore = create<SOMState>((set, get) => ({
 
   fetchSystemStatus: async () => {
     try {
-      const res = await fetch(`/api/system/status`);
+      const res = await fetch(getApiUrl(`/api/system/status`));
       const data = await res.json();
       if (data?.success) {
         set({ hardware: data.hardware });
@@ -329,7 +346,7 @@ export const useSomStore = create<SOMState>((set, get) => ({
       if (onlyMajor !== undefined) formData.append('onlyMajor', onlyMajor.toString());
       if (temporal !== undefined) formData.append('temporal', temporal.toString());
 
-      const response = await fetch(`/api/preprocess/bibliometrics`, { 
+      const response = await fetch(getApiUrl(`/api/preprocess/bibliometrics`), { 
         method: 'POST',
         body: formData
       });
@@ -391,7 +408,7 @@ export const useSomStore = create<SOMState>((set, get) => ({
         labels: labels
       };
       
-      const res = await fetch('/api/som/train', {
+      const res = await fetch(getApiUrl('/api/som/train'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
