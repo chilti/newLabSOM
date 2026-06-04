@@ -1,0 +1,6 @@
+@LabSOM.Backend.Core_HostAddress = http://localhost:5237
+
+GET {{LabSOM.Backend.Core_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

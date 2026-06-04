@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/LabSOM.Backend.Core/LabSOM.Backend.Core.csproj" />
+    <Project Path="src/LabSOM.Desktop/LabSOM.Desktop.csproj" />
+  </Folder>
+</Solution>

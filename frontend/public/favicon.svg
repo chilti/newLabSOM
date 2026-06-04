@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none" width="100%" height="100%">
+  <!-- Fondo sutil circular oscuro para contraste -->
+  <circle cx="60" cy="60" r="58" fill="#050508" stroke="#181f2b" strokeWidth="2" />
+  
+  <!-- Grilla Hexagonal Interna de fondo -->
+  <polygon points="60,15 99,37.5 99,82.5 60,105 21,82.5 21,37.5" stroke="#2a3447" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+  
+  <!-- Líneas divisorias internas del hexágono para simular malla SOM -->
+  <path d="M60,15 L60,105 M21,37.5 L99,82.5 M21,82.5 L99,37.5" stroke="#2a3447" strokeWidth="2" strokeDasharray="3,3" opacity="0.6" />
+  
+  <!-- Hexágono interno concéntrico -->
+  <polygon points="60,37.5 79.5,48.75 79.5,71.25 60,82.5 40.5,71.25 40.5,48.75" stroke="#2a3447" strokeWidth="2.5" opacity="0.8" />
+  
+  <!-- Spline continuo sinuoso fluorescente en degradado (Azul cobalto -> Azul eléctrico -> Cian neón) -->
+  <path d="M30,50 C45,25 75,25 90,50 C105,75 15,75 30,100 C45,105 75,105 90,80" stroke="url(#spline-grad)" strokeWidth="6" strokeLinecap="round" fill="none" filter="url(#glow-filter)" />
+  
+  <!-- Nodos resplandecientes en puntos estratégicos -->
+  <circle cx="30" cy="50" r="4.5" fill="#a8f5ff" stroke="#00f0ff" strokeWidth="1.5" />
+  <circle cx="90" cy="50" r="4.5" fill="#a8f5ff" stroke="#00f0ff" strokeWidth="1.5" />
+  <circle cx="60" cy="60" r="5" fill="#ffffff" stroke="#00f0ff" strokeWidth="2" />
+  
+  <defs>
+    <!-- Gradiente cian-azul-cobalto -->
+    <linearGradient id="spline-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stopColor="#00f0ff" />
+      <stop offset="50%" stopColor="#0088ff" />
+      <stop offset="100%" stopColor="#0044ff" />
+    </linearGradient>
+    
+    <!-- Filtro de resplandor neón -->
+    <filter id="glow-filter" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+</svg>

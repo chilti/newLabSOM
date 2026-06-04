@@ -1,0 +1,25 @@
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.npm/
+
+# C# / Backend
+backend/**/bin/
+backend/**/obj/
+backend/**/Properties/launchSettings.json
+*.user
+
+# Python / Engine
+engine/__pycache__/
+engine/*.pyc
+engine/.venv/
+engine/venv/
+engine/temp/
+
+# Environment
+.env
+.env.local
+
+# OS generated files
+.DS_Store
+Thumbs.db
