@@ -11,7 +11,7 @@ COPY backend/ backend/
 RUN dotnet publish backend/src/LabSOM.Backend.Core/LabSOM.Backend.Core.csproj -c Release -o /app/publish /p:UseAppHost=false
 
 # Stage 2: Final Runtime Image (CUDA + Python + .NET 8)
-FROM nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04
+FROM nvidia/cuda:13.2.1-runtime-ubuntu22.04
 
 # Avoid tzdata interactive prompt during apt-get install
 ENV DEBIAN_FRONTEND=noninteractive
