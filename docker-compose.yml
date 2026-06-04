@@ -5,6 +5,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      network: host
     ports:
       - "5015:80"
     depends_on:
