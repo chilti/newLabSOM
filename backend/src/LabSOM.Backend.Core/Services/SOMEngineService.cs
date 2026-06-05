@@ -89,9 +89,14 @@ namespace LabSOM.Backend.Core.Services
 
                 if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(stdout))
                 {
+                    // Some libraries (e.g. cuML) print info/log lines directly to stdout BEFORE
+                    // the JSON payload. Strip everything before the first '{' to get clean JSON.
+                    int jsonStart = stdout.IndexOf('{');
+                    string jsonOnly = jsonStart > 0 ? stdout[jsonStart..] : stdout;
+                    
                     try
                     {
-                        var result = JsonSerializer.Deserialize<SOMTrainingResult>(stdout, new JsonSerializerOptions
+                        var result = JsonSerializer.Deserialize<SOMTrainingResult>(jsonOnly, new JsonSerializerOptions
                         {
                             PropertyNameCaseInsensitive = true
                         });
@@ -103,7 +108,6 @@ namespace LabSOM.Backend.Core.Services
                     }
                     catch (JsonException jex)
                     {
-                        // Show first 500 chars of stdout to help diagnose non-JSON prefix (e.g. spurious print())
                         string stdoutPreview = stdout.Length > 500 ? stdout[..500] + "..." : stdout;
                         return new SOMTrainingResult
                         {
