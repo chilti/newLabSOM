@@ -1347,10 +1347,10 @@ export const ExploradorDatos: React.FC = () => {
                                             type="color"
                                             value={entityColorOverrides[traj.name] || traj.color}
                                             onChange={(e) => {
-                                              setEntityColorOverrides(prev => ({
-                                                ...prev,
+                                              setEntityColorOverrides({
+                                                ...entityColorOverrides,
                                                 [traj.name]: e.target.value
-                                              }));
+                                              });
                                             }}
                                             className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
                                           />
@@ -1361,11 +1361,11 @@ export const ExploradorDatos: React.FC = () => {
                                         {/* Reset color button */}
                                         {entityColorOverrides[traj.name] && (
                                           <button
-                                            onClick={() => setEntityColorOverrides(prev => {
-                                              const next = { ...prev };
+                                            onClick={() => {
+                                              const next = { ...entityColorOverrides };
                                               delete next[traj.name];
-                                              return next;
-                                            })}
+                                              setEntityColorOverrides(next);
+                                            }}
                                             className="text-[8px] text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition"
                                             title="Reset to default color"
                                           >
