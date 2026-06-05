@@ -100,6 +100,19 @@ interface SOMState {
   setShowLabelsOnComponents: (show: boolean) => void;
   resetLabelFilters: () => void;
   
+  // PathSOM (Trajectory) State
+  activeTrajectories: Set<string>;
+  trajectoryLineWidth: number;
+  isTrajectoriesExpanded: boolean;
+  entityColorOverrides: Record<string, string>;
+  showLabelsOnUmapScatter: boolean;
+
+  setActiveTrajectories: (trajectories: Set<string>) => void;
+  setTrajectoryLineWidth: (width: number) => void;
+  setIsTrajectoriesExpanded: (expanded: boolean) => void;
+  setEntityColorOverrides: (overrides: Record<string, string>) => void;
+  setShowLabelsOnUmapScatter: (show: boolean) => void;
+  
   // Setters & Actions
   setConfig: (config: Partial<SOMConfig>) => void;
   setActiveTab: (tab: 'multidimensional' | 'temporal' | 'bibliometrics') => void;
@@ -238,6 +251,19 @@ export const useSomStore = create<SOMState>((set, get) => ({
     showLabelsOnComponents: false
   }),
 
+  // PathSOM (Trajectory) State
+  activeTrajectories: new Set<string>(),
+  trajectoryLineWidth: 2,
+  isTrajectoriesExpanded: false,
+  entityColorOverrides: {},
+  showLabelsOnUmapScatter: false,
+
+  setActiveTrajectories: (trajectories) => set({ activeTrajectories: trajectories }),
+  setTrajectoryLineWidth: (width) => set({ trajectoryLineWidth: width }),
+  setIsTrajectoriesExpanded: (expanded) => set({ isTrajectoriesExpanded: expanded }),
+  setEntityColorOverrides: (overrides) => set({ entityColorOverrides: overrides }),
+  setShowLabelsOnUmapScatter: (show) => set({ showLabelsOnUmapScatter: show }),
+
   setConfig: (newConfig) => set((state) => ({ config: { ...state.config, ...newConfig } })),
   setActiveTab: (tab) => set({ activeTab: tab }),
 
@@ -329,7 +355,9 @@ export const useSomStore = create<SOMState>((set, get) => ({
       labels: parsed.documentLabels,
       compNames: parsed.selectedHeaders,
       result: null, // clear previous results
-      isCmaSmoothingActive: false // reset CMA smoothing flag
+      isCmaSmoothingActive: false, // reset CMA smoothing flag
+      activeTrajectories: new Set<string>(),
+      entityColorOverrides: {}
     });
   },
 

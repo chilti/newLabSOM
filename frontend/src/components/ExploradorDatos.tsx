@@ -44,7 +44,17 @@ export const ExploradorDatos: React.FC = () => {
     isCmaSmoothingActive,
     cmaWindowSize,
     setIsCmaSmoothingActive,
-    setCmaWindowSize
+    setCmaWindowSize,
+    activeTrajectories,
+    setActiveTrajectories,
+    trajectoryLineWidth,
+    setTrajectoryLineWidth,
+    isTrajectoriesExpanded,
+    setIsTrajectoriesExpanded,
+    entityColorOverrides,
+    setEntityColorOverrides,
+    showLabelsOnUmapScatter,
+    setShowLabelsOnUmapScatter
   } = useSomStore();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -98,16 +108,7 @@ export const ExploradorDatos: React.FC = () => {
   }, []);
 
   // --- PATHSOM STATE ---
-  const [activeTrajectories, setActiveTrajectories] = useState<Set<string>>(new Set());
-  const [trajectoryLineWidth, setTrajectoryLineWidth] = useState(2);
-  const [isTrajectoriesExpanded, setIsTrajectoriesExpanded] = useState(false);
-  // Per-entity color overrides (entity name -> hex color)
-  const [entityColorOverrides, setEntityColorOverrides] = useState<Record<string, string>>({});
-  // Show labels on main UMAP 2D scatter
-  const [showLabelsOnUmapScatter, setShowLabelsOnUmapScatter] = useState(false);
-
-  // Track if we've initialized the default active trajectories to avoid re-triggering on "None" button
-  const hasInitializedPathsom = useRef(false);
+  // State is now managed globally in useSomStore() to persist across tabs.
 
   // Determine if the current dataset has trajectories (temporal data)
   const hasTrajectories = useMemo(() => {
@@ -149,18 +150,6 @@ export const ExploradorDatos: React.FC = () => {
     return trajs.sort((a, b) => a.name.localeCompare(b.name));
   }, [labels, result, entityColorOverrides, trajectoryLineWidth]);
 
-  // When trajectories are first loaded, make them all deselected by default
-  useEffect(() => {
-    if (availableTrajectories.length > 0 && !hasInitializedPathsom.current) {
-      setActiveTrajectories(new Set());
-      hasInitializedPathsom.current = true;
-    }
-  }, [availableTrajectories]);
-
-  // Reset initialization flag if a new dataset is loaded
-  useEffect(() => {
-    hasInitializedPathsom.current = false;
-  }, [labels]);
   // --- END PATHSOM STATE ---
 
   useEffect(() => {
