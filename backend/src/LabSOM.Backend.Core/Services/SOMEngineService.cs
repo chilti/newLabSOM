@@ -61,28 +61,62 @@ namespace LabSOM.Backend.Core.Services
                 using var process = new Process { StartInfo = psi };
                 process.Start();
 
-                // Read output streams asynchronously
-                string stdout = await process.StandardOutput.ReadToEndAsync();
-                string stderr = await process.StandardError.ReadToEndAsync();
-                await process.WaitForExitAsync();
+                // IMPORTANT: Read stdout and stderr CONCURRENTLY to avoid the classic deadlock
+                // where the process fills one pipe's OS buffer while we're blocking on the other.
+                // With large datasets (e.g. 8000+ rows) stderr receives enough PyTorch/engine logs
+                // to fill the buffer and stall the process while we wait on stdout.
+                var stdoutTask = process.StandardOutput.ReadToEndAsync();
+                var stderrTask = process.StandardError.ReadToEndAsync();
+                
+                // Apply a generous timeout for large training runs (10 minutes)
+                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+                try
+                {
+                    await process.WaitForExitAsync(cts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    process.Kill(entireProcessTree: true);
+                    return new SOMTrainingResult
+                    {
+                        Success = false,
+                        Error = "Training timed out after 10 minutes. Consider reducing dataset size, grid dimensions, or iterations."
+                    };
+                }
+                
+                string stdout = await stdoutTask;
+                string stderr = await stderrTask;
 
                 if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(stdout))
                 {
-                    var result = JsonSerializer.Deserialize<SOMTrainingResult>(stdout, new JsonSerializerOptions
+                    try
                     {
-                        PropertyNameCaseInsensitive = true
-                    });
-                    
-                    if (result != null)
+                        var result = JsonSerializer.Deserialize<SOMTrainingResult>(stdout, new JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true
+                        });
+                        
+                        if (result != null)
+                        {
+                            return result;
+                        }
+                    }
+                    catch (JsonException jex)
                     {
-                        return result;
+                        // Show first 500 chars of stdout to help diagnose non-JSON prefix (e.g. spurious print())
+                        string stdoutPreview = stdout.Length > 500 ? stdout[..500] + "..." : stdout;
+                        return new SOMTrainingResult
+                        {
+                            Success = false,
+                            Error = $"JSON parse error: {jex.Message} | stdout preview: {stdoutPreview} | stderr: {stderr}"
+                        };
                     }
                 }
 
                 return new SOMTrainingResult
                 {
                     Success = false,
-                    Error = $"Subprocess error (exit code {process.ExitCode}). Stderr: {stderr}"
+                    Error = $"Subprocess error (exit code {process.ExitCode}). stdout: {(string.IsNullOrWhiteSpace(stdout) ? "(empty)" : stdout[..Math.Min(200, stdout.Length)])} | stderr: {stderr}"
                 };
             }
             catch (Exception ex)
