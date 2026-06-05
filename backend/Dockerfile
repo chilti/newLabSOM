@@ -37,6 +37,9 @@ WORKDIR /app
 # Copy the Python engine scripts and requirements
 COPY engine/ /app/engine/
 
+# Upgrade pip, setuptools, and wheel to get the fast, modern dependency resolver
+RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel
+
 # Install python dependencies
 RUN pip3 install --no-cache-dir -r /app/engine/requirements.txt
 
