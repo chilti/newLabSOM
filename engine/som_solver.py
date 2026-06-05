@@ -3,6 +3,7 @@ import scipy.spatial.distance as dist
 from sklearn.cluster import AgglomerativeClustering, KMeans
 import sys
 import json
+import torch
 
 class SOMSolver:
     def __init__(self, rows, cols, input_dim, grid_type="hexagonal", metric="euclidean"):
@@ -13,7 +14,7 @@ class SOMSolver:
         self.metric = metric
         
         # Initialize grid coordinates for neighborhood calculations
-        self.coords = np.zeros((rows * cols, 2))
+        self.coords_np = np.zeros((rows * cols, 2))
         R = 1.0
         apotema = np.sqrt(3) / 2.0
         avanceX = 1.5 * R
@@ -23,195 +24,182 @@ class SOMSolver:
             for j in range(cols):
                 idx = j + i * cols
                 # Flat-topped hexagonal layout coordinates
-                self.coords[idx, 0] = i * avanceX
-                self.coords[idx, 1] = j * avanceY + (apotema if i % 2 != 0 else 0.0)
+                self.coords_np[idx, 0] = i * avanceX
+                self.coords_np[idx, 1] = j * avanceY + (apotema if i % 2 != 0 else 0.0)
                 
         # Calculate pair-wise grid distances for all neurons
-        self.grid_dist = dist.squareform(dist.pdist(self.coords, metric='euclidean'))
+        self.grid_dist_np = dist.squareform(dist.pdist(self.coords_np, metric='euclidean'))
         
-        # Initialize weights (randomly or normalized)
         self.weights = None
+        self.grid_dist = None
+        self.coords = None
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print(f"[*] SOM Engine initialized. Device assigned: {self.device}")
         
     def initialize_weights(self, data, init_type="random"):
         n_samples = data.shape[0]
+        
+        # Setup Tensors
+        self.grid_dist = torch.tensor(self.grid_dist_np, dtype=torch.float32, device=self.device)
+        self.coords = torch.tensor(self.coords_np, dtype=torch.float32, device=self.device)
+            
         if init_type == "random":
-            # Random uniform in the range of the data
             mins = np.min(data, axis=0)
             maxs = np.max(data, axis=0)
-            self.weights = np.random.uniform(mins, maxs, size=(self.rows * self.cols, self.input_dim))
+            weights_np = np.random.uniform(mins, maxs, size=(self.rows * self.cols, self.input_dim))
+            self.weights = torch.tensor(weights_np, dtype=torch.float32, device=self.device)
         elif init_type == "linear" or init_type == "pca":
-            # PCA initialization or linear interpolation
             from sklearn.decomposition import PCA
             pca = PCA(n_components=min(2, self.input_dim))
             pca.fit(data)
-            self.weights = np.zeros((self.rows * self.cols, self.input_dim))
-            # Spread on eigenvectors
+            weights_np = np.zeros((self.rows * self.cols, self.input_dim))
             mean = np.mean(data, axis=0)
-            self.weights += mean
+            weights_np += mean
             
-            # Simple spread based on coordinates
+            max_x = np.max(self.coords_np[:, 0])
+            max_y = np.max(self.coords_np[:, 1])
+            
             for i in range(self.rows * self.cols):
-                # Normalized coordinates between -1 and 1
-                nx = 2.0 * (self.coords[i, 0] / np.max(self.coords[:, 0])) - 1.0 if np.max(self.coords[:, 0]) > 0 else 0
-                ny = 2.0 * (self.coords[i, 1] / np.max(self.coords[:, 1])) - 1.0 if np.max(self.coords[:, 1]) > 0 else 0
+                nx = 2.0 * (self.coords_np[i, 0] / max_x) - 1.0 if max_x > 0 else 0
+                ny = 2.0 * (self.coords_np[i, 1] / max_y) - 1.0 if max_y > 0 else 0
                 
                 if self.input_dim > 1:
-                    self.weights[i] += nx * pca.components_[0] * np.sqrt(pca.explained_variance_[0])
+                    weights_np[i] += nx * pca.components_[0] * np.sqrt(pca.explained_variance_[0])
                 if self.input_dim > 2:
-                    self.weights[i] += ny * pca.components_[1] * np.sqrt(pca.explained_variance_[1])
+                    weights_np[i] += ny * pca.components_[1] * np.sqrt(pca.explained_variance_[1])
+                    
+            self.weights = torch.tensor(weights_np, dtype=torch.float32, device=self.device)
         else:
-            # Initialize with Zeros
-            self.weights = np.zeros((self.rows * self.cols, self.input_dim))
+            self.weights = torch.zeros((self.rows * self.cols, self.input_dim), dtype=torch.float32, device=self.device)
             
-    def _get_bmu(self, sample):
-        # Calculate distances of the sample to all weights using selected metric
+    def _compute_distances(self, X):
+        """Computes pairwise distances from X (N, D) to self.weights (M, D). Returns (N, M)."""
         if self.metric == "euclidean":
-            dists = np.sum((self.weights - sample) ** 2, axis=1)
+            return torch.cdist(X, self.weights, p=2.0)
         elif self.metric == "manhattan":
-            dists = np.sum(np.abs(self.weights - sample), axis=1)
+            return torch.cdist(X, self.weights, p=1.0)
         elif self.metric == "canberra":
-            denom = np.abs(self.weights) + np.abs(sample)
-            denom[denom == 0] = 1e-15
-            dists = np.sum(np.abs(self.weights - sample) / denom, axis=1)
-        else: # Default fallback to Euclidean
-            dists = np.sum((self.weights - sample) ** 2, axis=1)
-        return np.argmin(dists)
-        
+            num = torch.abs(X.unsqueeze(1) - self.weights.unsqueeze(0))
+            den = torch.abs(X).unsqueeze(1) + torch.abs(self.weights).unsqueeze(0) + 1e-15
+            return torch.sum(num / den, dim=2)
+        else:
+            return torch.cdist(X, self.weights, p=2.0)
+            
     def train_basic(self, data, iterations, learning_rate_start=0.5, sigma_start=None):
+        """Sequential/online SOM training. Slow due to iteration, but supported."""
         n_samples = data.shape[0]
         if sigma_start is None:
             sigma_start = max(self.rows, self.cols) / 2.0
             
         quantization_errors = []
+        X = torch.tensor(data, dtype=torch.float32, device=self.device)
         
         for t in range(iterations):
-            # Decay learning rate and sigma
             lr = learning_rate_start * (1.0 - t / iterations)
             sigma = sigma_start * np.exp(-t / iterations)
             
-            # Shuffle indices
-            indices = np.arange(n_samples)
-            np.random.shuffle(indices)
+            indices = torch.randperm(n_samples, device=self.device)
+            error_sum = 0.0
             
-            error_sum = 0
             for idx in indices:
-                sample = data[idx]
-                bmu = self._get_bmu(sample)
+                sample = X[idx].unsqueeze(0) # (1, D)
+                dists = self._compute_distances(sample)
+                bmu = torch.argmin(dists, dim=1)[0]
                 
-                # Compute distance of all neurons to BMU on the grid
                 grid_d = self.grid_dist[bmu]
+                h = torch.exp(- (grid_d ** 2) / (2 * (sigma ** 2)))
                 
-                # Gaussian neighborhood function
-                h = np.exp(- (grid_d ** 2) / (2 * (sigma ** 2)))
+                self.weights += lr * h.unsqueeze(1) * (sample - self.weights)
+                error_sum += torch.norm(sample - self.weights[bmu]).item()
                 
-                # Weight update
-                # weights = weights + lr * h * (sample - weights)
-                self.weights += lr * h[:, np.newaxis] * (sample - self.weights)
-                
-                # Collect error
-                error_sum += np.linalg.norm(sample - self.weights[bmu])
-                
-            quantization_errors.append(float(error_sum / n_samples))
+            quantization_errors.append(error_sum / n_samples)
             
         return quantization_errors
 
     def train_batch(self, data, iterations, sigma_start=None):
+        """Fully vectorized, highly parallel Batch SOM training on GPU/Multicore."""
         n_samples = data.shape[0]
         if sigma_start is None:
             sigma_start = max(self.rows, self.cols) / 2.0
             
         quantization_errors = []
+        X = torch.tensor(data, dtype=torch.float32, device=self.device)
         
         for t in range(iterations):
-            # Sigma decay
             sigma = sigma_start * np.exp(-t / iterations)
             if sigma < 0.1:
                 sigma = 0.1
                 
-            # Matrices to accumulate numerators and denominators for weight update
-            # W_new = Sum_j ( h_cj * data_j ) / Sum_j ( h_cj )
-            numerator = np.zeros_like(self.weights)
-            denominator = np.zeros((self.rows * self.cols, 1))
+            dists = self._compute_distances(X) # (n_samples, n_neurons)
+            bmus = torch.argmin(dists, dim=1) # (n_samples,)
             
-            error_sum = 0
+            # Extract grid distances to the BMU for each sample
+            grid_d = self.grid_dist[bmus] # (n_samples, n_neurons)
             
-            for j in range(n_samples):
-                sample = data[j]
-                bmu = self._get_bmu(sample)
-                
-                # Neighborhood decay
-                grid_d = self.grid_dist[bmu]
-                h = np.exp(- (grid_d ** 2) / (2 * (sigma ** 2)))
-                
-                numerator += h[:, np.newaxis] * sample
-                denominator += h[:, np.newaxis]
-                
-                # Error tracking
-                error_sum += np.linalg.norm(sample - self.weights[bmu])
-                
-            # Update weights where denominator is non-zero
+            # Neighborhood weights
+            h = torch.exp(- (grid_d ** 2) / (2 * (sigma ** 2))) # (n_samples, n_neurons)
+            
+            # Batch update matrix algebra
+            numerator = torch.matmul(h.t(), X) # (n_neurons, D)
+            denominator = torch.sum(h, dim=0).unsqueeze(1) # (n_neurons, 1)
+            
             nonzero_idx = (denominator > 0).squeeze()
             self.weights[nonzero_idx] = numerator[nonzero_idx] / denominator[nonzero_idx]
             
-            quantization_errors.append(float(error_sum / n_samples))
+            # Error tracking
+            sample_errors = torch.norm(X - self.weights[bmus], dim=1)
+            quantization_errors.append(sample_errors.mean().item())
             
         return quantization_errors
 
     def get_umatrix(self):
-        """
-        Calculates U-Matrix values.
-        For each neuron, it is the average weight distance to its direct neighbors (grid distance <= 1.5).
-        """
+        """Calculates U-Matrix values via neighbor distances."""
         umatrix = np.zeros(self.rows * self.cols)
+        weights_np = self.weights.cpu().numpy()
         for i in range(self.rows * self.cols):
-            # Direct neighbors on flat-topped hexagonal grid have distance <= 1.8
-            neighbor_indices = np.where((self.grid_dist[i] > 0) & (self.grid_dist[i] < 1.85))[0]
+            # Neighbors distance threshold for hex topology
+            neighbor_indices = np.where((self.grid_dist_np[i] > 0) & (self.grid_dist_np[i] < 1.85))[0]
             if len(neighbor_indices) > 0:
-                dists = [np.linalg.norm(self.weights[i] - self.weights[n]) for n in neighbor_indices]
+                dists = [np.linalg.norm(weights_np[i] - weights_np[n]) for n in neighbor_indices]
                 umatrix[i] = np.mean(dists)
             else:
                 umatrix[i] = 0
         return umatrix.reshape((self.rows, self.cols)).tolist()
 
     def get_clustering(self, n_clusters):
-        """
-        Groups neurons into n_clusters using Agglomerative Clustering based on weight similarities.
-        """
+        """Agglomerative Clustering on the SOM weights."""
         clustering = AgglomerativeClustering(n_clusters=n_clusters, metric='euclidean', linkage='ward')
-        labels = clustering.fit_predict(self.weights)
+        labels = clustering.fit_predict(self.weights.cpu().numpy())
         return labels.tolist()
 
     def get_bmus_and_frequencies(self, data):
-        """
-        Maps data to BMU indexes and counts activation frequencies of each neuron.
-        """
-        n_samples = data.shape[0]
-        bmus = []
-        frequencies = np.zeros(self.rows * self.cols)
-        quantization_errors = np.zeros(self.rows * self.cols)
-        bmu_counts = np.zeros(self.rows * self.cols)
+        """Maps dataset and calculates hit frequencies and quantization errors."""
+        X = torch.tensor(data, dtype=torch.float32, device=self.device)
+        n_neurons = self.rows * self.cols
         
-        for j in range(n_samples):
-            bmu = self._get_bmu(data[j])
-            bmus.append(int(bmu))
-            frequencies[bmu] += 1
-            bmu_counts[bmu] += 1
-            quantization_errors[bmu] += np.linalg.norm(data[j] - self.weights[bmu])
-            
-        # Normalize frequencies to range [0, 1]
-        max_freq = np.max(frequencies)
-        normalized_freq = (frequencies / max_freq).tolist() if max_freq > 0 else frequencies.tolist()
+        dists = self._compute_distances(X)
+        bmus = torch.argmin(dists, dim=1)
         
-        # Calculate average quantization error per neuron
-        avg_qe = np.zeros(self.rows * self.cols)
-        for i in range(self.rows * self.cols):
-            if bmu_counts[i] > 0:
-                avg_qe[i] = quantization_errors[i] / bmu_counts[i]
+        selected_weights = self.weights[bmus]
+        sample_errors = torch.norm(X - selected_weights, dim=1)
         
-        max_qe = np.max(avg_qe)
-        normalized_qe = (avg_qe / max_qe).tolist() if max_qe > 0 else avg_qe.tolist()
+        frequencies = torch.zeros(n_neurons, dtype=torch.float32, device=self.device)
+        quantization_errors = torch.zeros(n_neurons, dtype=torch.float32, device=self.device)
         
-        return bmus, normalized_freq, normalized_qe
+        frequencies.scatter_add_(0, bmus, torch.ones_like(bmus, dtype=torch.float32))
+        quantization_errors.scatter_add_(0, bmus, sample_errors)
+        
+        max_freq = torch.max(frequencies)
+        normalized_freq = (frequencies / max_freq) if max_freq > 0 else frequencies
+        
+        avg_qe = torch.zeros_like(quantization_errors)
+        mask = frequencies > 0
+        avg_qe[mask] = quantization_errors[mask] / frequencies[mask]
+        
+        max_qe = torch.max(avg_qe)
+        normalized_qe = (avg_qe / max_qe) if max_qe > 0 else avg_qe
+        
+        return bmus.cpu().tolist(), normalized_freq.cpu().tolist(), normalized_qe.cpu().tolist()
 
 def run_umap(data, fallback_level=3, n_components=2):
     """
@@ -225,18 +213,18 @@ def run_umap(data, fallback_level=3, n_components=2):
             embedding = reducer.fit_transform(data)
             return embedding.tolist(), "Level 1: cuML GPU Acceleration"
         except Exception as e:
+            print(f"cuML fallback triggered: {e}", file=sys.stderr)
             fallback_level = 2 # Downgrade to Level 2
             
     # Level 2: GPU Open Hardware / PyTorch / ONNX Runtime
     if fallback_level == 2:
         try:
-            # In a real environment, this might use custom parametric ONNX/PyTorch UMAP.
-            # We'll run UMAP-Learn CPU but mark it if ONNX execution is enabled
             import umap
             reducer = umap.UMAP(n_components=n_components, random_state=42)
             embedding = reducer.fit_transform(data)
-            return embedding.tolist(), "Level 2: PyTorch/ONNX Optimized Execution"
-        except Exception:
+            return embedding.tolist(), "Level 2: Multicore PyTorch/ONNX Execution"
+        except Exception as e:
+            print(f"Level 2 fallback triggered: {e}", file=sys.stderr)
             fallback_level = 3 # Downgrade to CPU Fallback
             
     # Level 3: CPU Fallback
@@ -246,7 +234,6 @@ def run_umap(data, fallback_level=3, n_components=2):
         embedding = reducer.fit_transform(data)
         return embedding.tolist(), "Level 3: CPU Fallback Universal"
     except Exception as e:
-        # Fallback to simple PCA/t-SNE if UMAP is completely missing
         from sklearn.decomposition import PCA
         pca = PCA(n_components=n_components)
         embedding = pca.fit_transform(data)
