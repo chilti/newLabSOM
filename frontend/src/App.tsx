@@ -12,7 +12,8 @@ export default function App() {
     preprocessBibliometrics,
     fetchSystemStatus,
     hardware,
-    pendingNetworkCsv
+    pendingNetworkCsv,
+    uploadProgress
   } = useSomStore();
 
   // Collapsible sidebar state
@@ -376,12 +377,22 @@ export default function App() {
                   <button
                     type="submit"
                     disabled={isPreprocessing}
-                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-800 disabled:text-gray-600 text-white rounded-xl font-bold transition flex items-center justify-center space-x-2 mt-4"
+                    className="relative w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-900 disabled:text-gray-500 text-white rounded-xl font-bold transition flex items-center justify-center space-x-2 mt-4 overflow-hidden"
                   >
                     {isPreprocessing ? (
                       <>
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>Preprocessing...</span>
+                        <RefreshCw className="w-4 h-4 animate-spin z-10" />
+                        <span className="z-10">
+                          {uploadProgress !== null && uploadProgress < 100 
+                            ? `Uploading dataset... ${uploadProgress}%` 
+                            : 'Analyzing data on server...'}
+                        </span>
+                        {uploadProgress !== null && uploadProgress < 100 && (
+                          <div 
+                            className="absolute left-0 top-0 bottom-0 bg-indigo-500 opacity-35 transition-all duration-200" 
+                            style={{ width: `${uploadProgress}%` }}
+                          />
+                        )}
                       </>
                     ) : (
                       <span>Process Bibliometrics</span>

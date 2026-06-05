@@ -57,6 +57,7 @@ interface SOMState {
   hardware: HardwareInfo | null;
   isTraining: boolean;
   isPreprocessing: boolean;
+  uploadProgress: number | null;
   activeTab: 'multidimensional' | 'temporal' | 'bibliometrics';
   
   // Data
@@ -192,6 +193,7 @@ export const useSomStore = create<SOMState>((set, get) => ({
   hardware: null,
   isTraining: false,
   isPreprocessing: false,
+  uploadProgress: null,
   activeTab: 'bibliometrics',
   
   dataMatrix: [],
@@ -362,7 +364,7 @@ export const useSomStore = create<SOMState>((set, get) => ({
   },
 
   preprocessBibliometrics: async (file: File, networkType: string, customTag?: string, maxTerms?: number, minCooc?: number, onlyMajor?: boolean, temporal?: boolean) => {
-    set({ isPreprocessing: true });
+    set({ isPreprocessing: true, uploadProgress: 0 });
     
     try {
       const formData = new FormData();
@@ -374,11 +376,37 @@ export const useSomStore = create<SOMState>((set, get) => ({
       if (onlyMajor !== undefined) formData.append('onlyMajor', onlyMajor.toString());
       if (temporal !== undefined) formData.append('temporal', temporal.toString());
 
-      const response = await fetch(getApiUrl(`/api/preprocess/bibliometrics`), { 
-        method: 'POST',
-        body: formData
+      const responseText = await new Promise<string>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            set({ uploadProgress: percent });
+          }
+        };
+        
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(xhr.responseText);
+          } else {
+            let errMsg = `Server error ${xhr.status}`;
+            try {
+              const resJson = JSON.parse(xhr.responseText);
+              errMsg = resJson.error || errMsg;
+            } catch {}
+            reject(new Error(errMsg));
+          }
+        };
+        
+        xhr.onerror = () => reject(new Error("Local API Connection failed. Make sure the backend is booted."));
+        xhr.ontimeout = () => reject(new Error("Request timed out"));
+        
+        xhr.open('POST', getApiUrl(`/api/preprocess/bibliometrics`));
+        xhr.send(formData);
       });
-      const result = await response.json();
+
+      const result = JSON.parse(responseText);
       if (result?.success) {
         // Note: For temporal sequences, we load frequency_csv instead of cooccurrence_csv because it contains the stacked Year_Entity vectors
         const networkCsv = temporal ? result.frequency_csv : result.cooccurrence_csv;
@@ -399,16 +427,17 @@ export const useSomStore = create<SOMState>((set, get) => ({
           network: result.network,
           networksByYear: result.networks_by_year || null,
           cooccurrenceCsv: result.cooccurrence_csv,
-          isPreprocessing: false
+          isPreprocessing: false,
+          uploadProgress: null
         });
       } else {
         alert("Preprocess error: " + (result?.error || "Unknown error"));
-        set({ isPreprocessing: false });
+        set({ isPreprocessing: false, uploadProgress: null });
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      alert("Local API Connection failed. Make sure the backend is booted.");
-      set({ isPreprocessing: false });
+      alert(e.message || "Local API Connection failed. Make sure the backend is booted.");
+      set({ isPreprocessing: false, uploadProgress: null });
     }
   },
 
