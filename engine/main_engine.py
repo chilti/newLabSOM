@@ -80,13 +80,13 @@ def handle_train(params):
                 "index": int(i),
                 "row": int(i // cols),
                 "col": int(i % cols),
-                "x": float(solver.coords[i, 0]),
-                "y": float(solver.coords[i, 1])
+                "x": float(solver.coords_np[i, 0]),
+                "y": float(solver.coords_np[i, 1])
             })
             
         # Format weights to list for JSON response
         # self.weights is (rows*cols, input_dim) -> flat-topped lists
-        weights_list = solver.weights.tolist()
+        weights_list = solver.weights.cpu().tolist()
         
         # Build document-to-neuron mapped label arrays
         # map each document label to its BMU

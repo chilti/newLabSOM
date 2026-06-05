@@ -34,7 +34,7 @@ class SOMSolver:
         self.grid_dist = None
         self.coords = None
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        print(f"[*] SOM Engine initialized. Device assigned: {self.device}")
+        print(f"[*] SOM Engine initialized. Device assigned: {self.device}", file=sys.stderr)
         
     def initialize_weights(self, data, init_type="random"):
         n_samples = data.shape[0]
