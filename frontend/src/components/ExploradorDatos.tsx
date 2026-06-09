@@ -1313,6 +1313,15 @@ export const ExploradorDatos: React.FC = () => {
                       <option value="batch">Batch SOM (Standard Batch Updates)</option>
                       <option value="basic">Basic SOM (Stochastic Iterative)</option>
                     </select>
+                    {config.method === 'basic' ? (
+                      <p className="text-[10px] text-gray-500 mt-2 leading-relaxed">
+                        <strong className="text-gray-400">Basic SOM</strong> trains sequentially one sample at a time. The <strong>learning rate</strong> decreases <span className="text-indigo-400">linearly</span> over time, while the <strong>neighborhood function (sigma)</strong> shrinks <span className="text-emerald-400">exponentially</span> to converge the map.
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-gray-500 mt-2 leading-relaxed">
+                        <strong className="text-gray-400">Batch SOM</strong> processes all samples simultaneously per epoch. It is much faster and does not require a learning rate, as weights are updated to the exact weighted average of their neighborhood.
+                      </p>
+                    )}
                   </div>
 
                   <div>
