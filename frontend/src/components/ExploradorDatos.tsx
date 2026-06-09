@@ -81,6 +81,10 @@ export const ExploradorDatos: React.FC = () => {
   
   const [umapHeatmapScale, setUmapHeatmapScale] = useState(1); // 1 = 240x200, 1.5 = 360x300, 2 = 480x400
 
+  // Pagination page for component maps (3x3 grid)
+  const [compPage, setCompPage] = useState(0);
+  const [umapCompPage, setUmapCompPage] = useState(0);
+
   // Main UMAP native zoom/pan state
   const [mainUmapZoom, setMainUmapZoom] = useState(1);
   const [mainUmapPan, setMainUmapPan] = useState({ x: 0, y: 0 });
