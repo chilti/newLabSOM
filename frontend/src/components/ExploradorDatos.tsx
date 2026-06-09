@@ -60,22 +60,25 @@ export const ExploradorDatos: React.FC = () => {
     showLabelsOnUmapScatter,
     setShowLabelsOnUmapScatter,
     reclusterLocally,
-    fileName
+    fileName,
+    exploSubTab, setExploSubTab,
+    exploUmapColorScale, setExploUmapColorScale,
+    exploSomColorScale, setExploSomColorScale,
   } = useSomStore();
+
+  // Alias store names to match local usage in JSX
+  const subTab = exploSubTab;
+  const setSubTab = setExploSubTab;
+  const umapColorScale = exploUmapColorScale;
+  const setUmapColorScale = setExploUmapColorScale;
+  const somColorScale = exploSomColorScale;
+  const setSomColorScale = setExploSomColorScale;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [labelIndex, setLabelIndex] = useState(0);
   const [hoveredUmapDot, setHoveredUmapDot] = useState<number | null>(null);
   const [showClusterMetrics, setShowClusterMetrics] = useState(false);
   
-  // Navigation sub-tabs within "Data & SOM"
-  const [subTab, setSubTab] = useState<'import' | 'training' | 'maps' | 'umap'>('import');
-  
-  // Pagination page for component maps (3x3 grid)
-  const [compPage, setCompPage] = useState(0);
-  const [umapCompPage, setUmapCompPage] = useState(0);
-  const [umapColorScale, setUmapColorScale] = useState<'standard' | 'viridis' | 'cividis'>('standard');
-  const [somColorScale, setSomColorScale] = useState<'standard' | 'viridis' | 'cividis'>('standard');
   const [umapHeatmapScale, setUmapHeatmapScale] = useState(1); // 1 = 240x200, 1.5 = 360x300, 2 = 480x400
 
   // Main UMAP native zoom/pan state

@@ -17,13 +17,17 @@ interface ForceLink extends d3Force.SimulationLinkDatum<ForceNode> {
 }
 
 export const RedBibliometrica: React.FC = () => {
-  const { network, networksByYear, documentCount, cooccurrenceCsv } = useSomStore();
+  const { network, networksByYear, documentCount, cooccurrenceCsv, biblioActiveView, setBiblioActiveView, biblioSelectedYear, setBiblioSelectedYear } = useSomStore();
   const [nodes, setNodes] = useState<ForceNode[]>([]);
   const [links, setLinks] = useState<ForceLink[]>([]);
   const [hoveredNode, setHoveredNode] = useState<ForceNode | null>(null);
-  const [activeView, setActiveView] = useState<'graph' | 'matrix'>('graph');
   const [hideDisconnected, setHideDisconnected] = useState<boolean>(false);
-  const [selectedYear, setSelectedYear] = useState<string>('Global');
+
+  // Alias store names to match local usage in JSX
+  const activeView = biblioActiveView;
+  const setActiveView = setBiblioActiveView;
+  const selectedYear = biblioSelectedYear;
+  const setSelectedYear = setBiblioSelectedYear;
 
   // Zoom, Pan & Dragging States
   const [zoomScale, setZoomScale] = useState(1);

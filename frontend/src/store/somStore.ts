@@ -134,6 +134,20 @@ interface SOMState {
   setDimTargetD: (d: number) => void;
   setDimReducedData: (data: number[][] | null) => void;
   clearDimState: () => void;
+
+  // ExploradorDatos UI preferences
+  exploSubTab: 'import' | 'training' | 'maps' | 'umap';
+  exploUmapColorScale: 'standard' | 'viridis' | 'cividis';
+  exploSomColorScale: 'standard' | 'viridis' | 'cividis';
+  setExploSubTab: (tab: 'import' | 'training' | 'maps' | 'umap') => void;
+  setExploUmapColorScale: (scale: 'standard' | 'viridis' | 'cividis') => void;
+  setExploSomColorScale: (scale: 'standard' | 'viridis' | 'cividis') => void;
+
+  // RedBibliometrica UI preferences
+  biblioActiveView: 'graph' | 'matrix';
+  biblioSelectedYear: string;
+  setBiblioActiveView: (view: 'graph' | 'matrix') => void;
+  setBiblioSelectedYear: (year: string) => void;
   
   // Setters & Actions
   setConfig: (config: Partial<SOMConfig>) => void;
@@ -262,6 +276,20 @@ export const useSomStore = create<SOMState>((set, get) => ({
     dimData: null, dimFileName: '', dimCeilingResult: null,
     dimManualAlgo: 'TwoNN', dimManualResult: null, dimTargetD: 2, dimReducedData: null
   }),
+
+  // ExploradorDatos UI preferences
+  exploSubTab: 'import',
+  exploUmapColorScale: 'standard',
+  exploSomColorScale: 'standard',
+  setExploSubTab: (tab) => set({ exploSubTab: tab }),
+  setExploUmapColorScale: (scale) => set({ exploUmapColorScale: scale }),
+  setExploSomColorScale: (scale) => set({ exploSomColorScale: scale }),
+
+  // RedBibliometrica UI preferences
+  biblioActiveView: 'graph',
+  biblioSelectedYear: 'Global',
+  setBiblioActiveView: (view) => set({ biblioActiveView: view }),
+  setBiblioSelectedYear: (year) => set({ biblioSelectedYear: year }),
 
   // Time-Series Preprocessing
   isCmaSmoothingActive: false,
