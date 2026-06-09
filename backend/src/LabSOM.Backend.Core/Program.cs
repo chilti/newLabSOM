@@ -97,6 +97,22 @@ app.MapPost("/api/som/evaluate_clusters", async (EvaluateClustersRequest request
     return Results.Ok(result);
 });
 
+// 5. Recluster Fast Endpoint
+app.MapPost("/api/som/recluster", async (ReclusterRequest request, SOMEngineService engine) =>
+{
+    if (request.Weights == null || request.Weights.Count == 0)
+    {
+        return Results.BadRequest(new { success = false, error = "Weights matrix is empty or invalid." });
+    }
+    
+    var result = await engine.ReclusterAsync(request);
+    if (!result.Success)
+    {
+        return Results.Json(result, statusCode: 500);
+    }
+    return Results.Ok(result);
+});
+
 // 5. UMAP Projections Endpoint
 app.MapPost("/api/som/umap", async (UmapRequest request, SOMEngineService engine) =>
 {

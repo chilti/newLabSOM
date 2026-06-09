@@ -59,6 +59,7 @@ export const ExploradorDatos: React.FC = () => {
     setEntityColorOverrides,
     showLabelsOnUmapScatter,
     setShowLabelsOnUmapScatter,
+    reclusterLocally,
     fileName
   } = useSomStore();
 
@@ -161,6 +162,37 @@ export const ExploradorDatos: React.FC = () => {
   useEffect(() => {
     fetchSystemStatus();
   }, []);
+
+  const handleRecluster = async () => {
+    if (!result || !result.weights) return;
+    try {
+      const isDesktop = window.location.protocol === 'file:' || window.location.protocol === 'about:' || !window.location.host;
+      const apiUrl = isDesktop ? 'http://localhost:5123/api/som/recluster' : '/api/som/recluster';
+      
+      const payload = {
+        weights: result.weights,
+        algorithm: config.clusteringAlgorithm,
+        n_clusters: config.nClusters,
+        eps: config.eps,
+        min_samples: config.minSamples
+      };
+      
+      const res = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      const json = await res.json();
+      if (json.success && json.clustering) {
+        reclusterLocally(json.clustering);
+      } else {
+        alert(json.error || "Failed to re-cluster");
+      }
+    } catch (e: any) {
+      alert("Network error: " + e.message);
+    }
+  };
 
   const handleFileDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -1341,6 +1373,16 @@ export const ExploradorDatos: React.FC = () => {
                     <span>Analyze Optimal Clusters</span>
                   </button>
                 )}
+                
+                <button
+                  onClick={handleRecluster}
+                  disabled={!result || dataMatrix.length === 0}
+                  title="Apply clustering parameters without retraining"
+                  className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black uppercase tracking-wider rounded-xl transition flex items-center justify-center space-x-2 cursor-pointer disabled:bg-gray-800 disabled:text-gray-600 w-full md:w-auto shadow-md shadow-emerald-900/20"
+                >
+                  <Activity className="w-3.5 h-3.5" />
+                  <span>Apply Fast Re-Clustering</span>
+                </button>
               </div>
             </div>
 

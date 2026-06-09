@@ -217,6 +217,79 @@ namespace LabSOM.Backend.Core.Services
         }
     }
 
+    public async Task<ReclusterResult> ReclusterAsync(ReclusterRequest request)
+    {
+        var scriptPath = Path.GetFullPath(Path.Combine(_enginePath, "main_engine.py"));
+        string tempDir = Path.GetFullPath(Path.Combine(_enginePath, "temp"));
+        if (!Directory.Exists(tempDir)) Directory.CreateDirectory(tempDir);
+        
+        string tempFile = Path.Combine(tempDir, $"som_reclust_{Guid.NewGuid():N}.json");
+        
+        try
+        {
+            string jsonPayload = JsonSerializer.Serialize(request);
+            await File.WriteAllTextAsync(tempFile, jsonPayload);
+            
+            var psi = new ProcessStartInfo
+            {
+                FileName = "python",
+                Arguments = $"\"{scriptPath}\" recluster \"{tempFile}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var process = new Process { StartInfo = psi };
+            process.Start();
+
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+            try
+            {
+                await process.WaitForExitAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                process.Kill(entireProcessTree: true);
+                return new ReclusterResult { Success = false, Error = "Reclustering timed out." };
+            }
+            
+            string stdout = await stdoutTask;
+            string stderr = await stderrTask;
+
+            if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(stdout))
+            {
+                int jsonStart = stdout.IndexOf('{');
+                string jsonOnly = jsonStart > 0 ? stdout[jsonStart..] : stdout;
+                
+                try
+                {
+                    var result = JsonSerializer.Deserialize<ReclusterResult>(jsonOnly, new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+                    if (result != null) return result;
+                }
+                catch (JsonException jex)
+                {
+                    return new ReclusterResult { Success = false, Error = $"JSON parse error: {jex.Message}" };
+                }
+            }
+            return new ReclusterResult { Success = false, Error = $"Subprocess error (exit code {process.ExitCode}). stderr: {stderr}" };
+        }
+        catch (Exception ex)
+        {
+            return new ReclusterResult { Success = false, Error = $"Exception: {ex.Message}" };
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) { try { File.Delete(tempFile); } catch { } }
+        }
+    }
+
     public async Task<UmapResult> GenerateUmapAsync(UmapRequest request)
     {
         var scriptPath = Path.GetFullPath(Path.Combine(_enginePath, "main_engine.py"));
@@ -430,5 +503,35 @@ public class SOMTrainingRequest
         
         [JsonPropertyName("umap_source")]
         public string Umap_Source { get; set; }
+    }
+
+    public class ReclusterRequest
+    {
+        [JsonPropertyName("weights")]
+        public List<List<double>> Weights { get; set; }
+
+        [JsonPropertyName("algorithm")]
+        public string Algorithm { get; set; }
+
+        [JsonPropertyName("n_clusters")]
+        public int N_Clusters { get; set; }
+
+        [JsonPropertyName("eps")]
+        public double Eps { get; set; }
+
+        [JsonPropertyName("min_samples")]
+        public int Min_Samples { get; set; }
+    }
+
+    public class ReclusterResult
+    {
+        [JsonPropertyName("success")]
+        public bool Success { get; set; }
+        
+        [JsonPropertyName("error")]
+        public string Error { get; set; }
+        
+        [JsonPropertyName("clustering")]
+        public List<int> Clustering { get; set; }
     }
 }

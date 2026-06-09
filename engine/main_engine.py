@@ -145,6 +145,27 @@ def handle_evaluate_clusters(params):
         import traceback
         return {"success": False, "error": f"Evaluation error: {str(e)}", "traceback": traceback.format_exc()}
 
+def handle_recluster(params):
+    weights_list = params.get("weights", [])
+    if not weights_list:
+        return {"success": False, "error": "No weights provided."}
+    
+    algorithm = params.get("algorithm", "dbscan")
+    n_clusters = params.get("n_clusters", 4)
+    eps = params.get("eps", 0.5)
+    min_samples = params.get("min_samples", 3)
+    
+    try:
+        solver = SOMSolver(1, len(weights_list), len(weights_list[0]))
+        import torch
+        solver.weights = torch.tensor(weights_list, dtype=torch.float32, device=solver.device)
+        
+        clustering_labels = solver.get_clustering(algorithm=algorithm, n_clusters=n_clusters, eps=eps, min_samples=min_samples)
+        return {"success": True, "clustering": clustering_labels}
+    except Exception as e:
+        import traceback
+        return {"success": False, "error": f"Recluster error: {str(e)}", "traceback": traceback.format_exc()}
+
 def handle_umap(params):
     import torch
     from som_solver import run_umap
@@ -207,6 +228,8 @@ def main():
         res = handle_train(params)
     elif action == "evaluate_clusters":
         res = handle_evaluate_clusters(params)
+    elif action == "recluster":
+        res = handle_recluster(params)
     elif action == "umap":
         res = handle_umap(params)
     else:

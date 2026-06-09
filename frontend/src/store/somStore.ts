@@ -131,6 +131,7 @@ interface SOMState {
   generateUmap: () => Promise<boolean>;
   moveLabel: (label: string, fromBmu: number, toBmu: number) => void;
   recalculatePipeline: () => void;
+  reclusterLocally: (clustering: number[]) => void;
   exportProject: () => void;
   importProject: (fileContent: string) => void;
 }
@@ -594,6 +595,19 @@ export const useSomStore = create<SOMState>((set, get) => ({
         }
       };
     });
+  },
+
+  reclusterLocally: (clustering: number[]) => {
+    const { result } = get();
+    if (!result) return;
+    
+    // Create new result object with updated clustering array
+    const newResult = {
+      ...result,
+      clustering: clustering
+    };
+    
+    set({ result: newResult });
   },
 
   exportProject: () => {
