@@ -15,7 +15,8 @@ import {
   ZoomIn,
   ZoomOut,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Download
 } from 'lucide-react';
 import { BoxPlot } from './BoxPlot';
 import { MallaHexagonal, type Trajectory } from './MallaHexagonal';
@@ -555,6 +556,38 @@ export const ExploradorDatos: React.FC = () => {
         </body>
       </html>`);
     popup.document.close();
+  };
+  const exportClusteredData = () => {
+    if (!result || !originalDataMatrix) {
+      alert("No trained SOM or dataset available.");
+      return;
+    }
+    
+    // Create CSV header
+    const csvRows = [];
+    const headers = ['Label', ...compNames.map(name => `"${name}"`), 'Cluster_ID'];
+    csvRows.push(headers.join(','));
+    
+    // Append rows
+    for (let i = 0; i < originalDataMatrix.length; i++) {
+      const bmu = result.bmus[i];
+      const clusterId = result.clustering[bmu];
+      const row = [
+        `"${labels[i]}"`,
+        ...originalDataMatrix[i],
+        clusterId
+      ];
+      csvRows.push(row.join(','));
+    }
+    
+    const csvContent = csvRows.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${fileName ? fileName.replace('.csv', '') : 'dataset'}_clustered.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   // Render UMAP Projections
@@ -1514,7 +1547,14 @@ export const ExploradorDatos: React.FC = () => {
 
                       {/* Clustering Port */}
                       <div id="comp-viewport-clustering" className="relative border border-gray-800 bg-gray-900 bg-opacity-40 rounded-2xl p-5 shadow-lg flex flex-col h-[420px]">
-                        <div className="absolute top-4 right-4 z-20">
+                        <div className="absolute top-4 right-4 z-20 flex space-x-2">
+                          <button
+                            onClick={exportClusteredData}
+                            className="p-2 bg-gray-950 border border-emerald-900 hover:border-emerald-500 text-emerald-500 hover:text-emerald-400 rounded-xl transition cursor-pointer shadow-lg shadow-emerald-900/20"
+                            title="Export Data with Cluster Column"
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
                           <button
                             onClick={() => openMapPopup('comp-viewport-clustering', 'Clustering Map')}
                             className="p-2 bg-gray-950 border border-gray-800 hover:border-indigo-500 text-gray-400 hover:text-white rounded-xl transition cursor-pointer"
@@ -1523,7 +1563,7 @@ export const ExploradorDatos: React.FC = () => {
                             <ExternalLink className="w-4 h-4" />
                           </button>
                         </div>
-                        <div className="mb-2">
+                        <div className="mb-2 pr-20">
                           <h4 className="text-xs font-black uppercase text-gray-300">
                             {config.clusteringAlgorithm === 'agglomerative' ? 'Agglomerative Clusters' : 'DBSCAN Clusters'}
                           </h4>
