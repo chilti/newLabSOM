@@ -118,6 +118,22 @@ interface SOMState {
   setIsTrajectoriesExpanded: (expanded: boolean) => void;
   setEntityColorOverrides: (overrides: Record<string, string>) => void;
   setShowLabelsOnUmapScatter: (show: boolean) => void;
+
+  // Dim Reduction persistent state
+  dimData: number[][] | null;
+  dimFileName: string;
+  dimCeilingResult: any;
+  dimManualAlgo: string;
+  dimManualResult: any;
+  dimTargetD: number;
+  dimReducedData: number[][] | null;
+  setDimData: (data: number[][] | null, fileName: string) => void;
+  setDimCeilingResult: (result: any) => void;
+  setDimManualAlgo: (algo: string) => void;
+  setDimManualResult: (result: any) => void;
+  setDimTargetD: (d: number) => void;
+  setDimReducedData: (data: number[][] | null) => void;
+  clearDimState: () => void;
   
   // Setters & Actions
   setConfig: (config: Partial<SOMConfig>) => void;
@@ -227,6 +243,25 @@ export const useSomStore = create<SOMState>((set, get) => ({
   pendingNetworkCsv: null,
   pendingNetworkOrigin: null,
   result: null,
+
+  // Dim Reduction persistent state
+  dimData: null,
+  dimFileName: '',
+  dimCeilingResult: null,
+  dimManualAlgo: 'TwoNN',
+  dimManualResult: null,
+  dimTargetD: 2,
+  dimReducedData: null,
+  setDimData: (data, fileName) => set({ dimData: data, dimFileName: fileName }),
+  setDimCeilingResult: (result) => set({ dimCeilingResult: result }),
+  setDimManualAlgo: (algo) => set({ dimManualAlgo: algo }),
+  setDimManualResult: (result) => set({ dimManualResult: result }),
+  setDimTargetD: (d) => set({ dimTargetD: d }),
+  setDimReducedData: (data) => set({ dimReducedData: data }),
+  clearDimState: () => set({
+    dimData: null, dimFileName: '', dimCeilingResult: null,
+    dimManualAlgo: 'TwoNN', dimManualResult: null, dimTargetD: 2, dimReducedData: null
+  }),
 
   // Time-Series Preprocessing
   isCmaSmoothingActive: false,

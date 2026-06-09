@@ -8,25 +8,16 @@ const ALGORITHMS = [
 ];
 
 export const DimReduction: React.FC = () => {
-  const { estimateDimension, reduceDimension, loadCsvData, setActiveTab } = useSomStore();
+  const {
+    estimateDimension, reduceDimension, loadCsvData, setActiveTab,
+    dimData, dimFileName, dimCeilingResult, dimManualAlgo, dimManualResult, dimTargetD, dimReducedData,
+    setDimData, setDimCeilingResult, setDimManualAlgo, setDimManualResult, setDimTargetD, setDimReducedData, clearDimState,
+  } = useSomStore();
   
-  const [data, setData] = useState<number[][] | null>(null);
-  const [fileName, setFileName] = useState<string>('');
-  
-  // Estimation State
+  // Only loading/error states remain local (they don't need to persist)
   const [isEstimatingCeiling, setIsEstimatingCeiling] = useState(false);
-  const [ceilingResult, setCeilingResult] = useState<any>(null);
-  
   const [isEstimatingManual, setIsEstimatingManual] = useState(false);
-  const [manualAlgo, setManualAlgo] = useState<string>('TwoNN');
-  const [manualResult, setManualResult] = useState<any>(null);
-  
-  // Reduction State
-  const [targetD, setTargetD] = useState<number>(2);
   const [isReducing, setIsReducing] = useState(false);
-  const [reducedData, setReducedData] = useState<number[][] | null>(null);
-
-  // Error State
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -34,34 +25,32 @@ export const DimReduction: React.FC = () => {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setFileName(file.name);
 
     Papa.parse(file, {
       skipEmptyLines: true,
       complete: (results) => {
-        // Assume first row is header if contains non-numbers
         const rows = results.data as string[][];
         if (rows.length === 0) return;
         
         let startIndex = 0;
         if (rows[0].some(val => isNaN(Number(val)))) {
-          startIndex = 1; // skip header
+          startIndex = 1;
         }
 
         const parsedData = rows.slice(startIndex).map(row => row.map(val => Number(val) || 0));
-        setData(parsedData);
+        setDimData(parsedData, file.name);
       }
     });
   };
 
   const runCeiling = async () => {
-    if (!data) return;
+    if (!dimData) return;
     setIsEstimatingCeiling(true);
     setErrorMessage(null);
-    const res = await estimateDimension(data, 'ceiling');
+    const res = await estimateDimension(dimData, 'ceiling');
     if (res.success) {
-      setCeilingResult(res);
-      setTargetD(Math.ceil(res.estimated_dimension));
+      setDimCeilingResult(res);
+      setDimTargetD(Math.ceil(res.estimated_dimension));
     } else {
       setErrorMessage("Ceiling Estimation Error: " + res.error);
     }
@@ -69,12 +58,12 @@ export const DimReduction: React.FC = () => {
   };
 
   const runManual = async () => {
-    if (!data) return;
+    if (!dimData) return;
     setIsEstimatingManual(true);
     setErrorMessage(null);
-    const res = await estimateDimension(data, 'manual', manualAlgo);
+    const res = await estimateDimension(dimData, 'manual', dimManualAlgo);
     if (res.success) {
-      setManualResult(res);
+      setDimManualResult(res);
     } else {
       setErrorMessage("Manual Estimation Error: " + res.error);
     }
@@ -82,12 +71,12 @@ export const DimReduction: React.FC = () => {
   };
 
   const runUMAP = async () => {
-    if (!data) return;
+    if (!dimData) return;
     setIsReducing(true);
     setErrorMessage(null);
-    const res = await reduceDimension(data, targetD);
+    const res = await reduceDimension(dimData, dimTargetD);
     if (res.success) {
-      setReducedData(res.reduced_data);
+      setDimReducedData(res.reduced_data);
     } else {
       setErrorMessage("UMAP Reduction Error: " + res.error);
     }
@@ -95,11 +84,9 @@ export const DimReduction: React.FC = () => {
   };
 
   const sendToSOM = () => {
-    if (!reducedData) return;
-    
-    // Create CSV text from reducedData
-    const csvContent = reducedData.map(row => row.join(',')).join('\n');
-    loadCsvData(csvContent, undefined, [], 'csv', `Reduced_${fileName}`);
+    if (!dimReducedData) return;
+    const csvContent = dimReducedData.map(row => row.join(',')).join('\n');
+    loadCsvData(csvContent, undefined, [], 'csv', `Reduced_${dimFileName}`);
     setActiveTab('multidimensional');
   };
 
@@ -112,7 +99,7 @@ export const DimReduction: React.FC = () => {
           <span>Upload High-Dimensional Dataset</span>
         </h3>
         
-        {!data ? (
+        {!dimData ? (
           <div 
             onClick={() => fileInputRef.current?.click()}
             className="border-2 border-dashed border-gray-700 rounded-xl p-10 flex flex-col items-center justify-center cursor-pointer hover:border-indigo-500 hover:bg-gray-800 transition-all group"
@@ -124,11 +111,11 @@ export const DimReduction: React.FC = () => {
         ) : (
           <div className="flex items-center justify-between bg-emerald-900 bg-opacity-20 border border-emerald-800 rounded-xl p-4">
             <div>
-              <p className="text-emerald-400 font-bold">{fileName}</p>
-              <p className="text-xs text-gray-400 mt-1">Loaded {data.length} rows and {data[0].length} dimensions.</p>
+              <p className="text-emerald-400 font-bold">{dimFileName}</p>
+              <p className="text-xs text-gray-400 mt-1">Loaded {dimData.length} rows and {dimData[0].length} dimensions.</p>
             </div>
             <button 
-              onClick={() => { setData(null); setReducedData(null); setCeilingResult(null); setManualResult(null); setErrorMessage(null); }}
+              onClick={() => { clearDimState(); setErrorMessage(null); }}
               className="text-xs text-gray-400 hover:text-white"
             >
               Clear
@@ -146,7 +133,7 @@ export const DimReduction: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* 2. Optimal Strategy: The Ceiling */}
-        <div className={`bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-xl ${!data ? 'opacity-50 pointer-events-none' : ''}`}>
+        <div className={`bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-xl ${!dimData ? 'opacity-50 pointer-events-none' : ''}`}>
           <h3 className="text-md font-bold text-gray-200 flex items-center space-x-2 mb-2">
             <Activity className="w-5 h-5 text-emerald-400" />
             <span>Optimal Strategy: The "Ceiling"</span>
@@ -164,27 +151,27 @@ export const DimReduction: React.FC = () => {
             <span>Calculate Intrinsic Ceiling</span>
           </button>
 
-          {ceilingResult && (
+          {dimCeilingResult && (
             <div className="mt-6 bg-gray-950 rounded-xl p-4 border border-gray-800">
-              <p className="text-emerald-400 font-black text-3xl text-center mb-1">{ceilingResult.estimated_dimension.toFixed(1)}</p>
+              <p className="text-emerald-400 font-black text-3xl text-center mb-1">{dimCeilingResult.estimated_dimension.toFixed(1)}</p>
               <p className="text-xs text-center text-gray-500 mb-4">Recommended Target Dimension (95th Percentile)</p>
               
               <div className="grid grid-cols-2 gap-4 text-xs">
                 <div className="bg-gray-900 p-2 rounded text-center">
                   <span className="block text-gray-500">Median</span>
-                  <span className="font-bold text-gray-200">{ceilingResult.metrics.median.toFixed(2)}</span>
+                  <span className="font-bold text-gray-200">{dimCeilingResult.metrics.median.toFixed(2)}</span>
                 </div>
                 <div className="bg-gray-900 p-2 rounded text-center">
                   <span className="block text-gray-500">Mean</span>
-                  <span className="font-bold text-gray-200">{ceilingResult.metrics.mean.toFixed(2)}</span>
+                  <span className="font-bold text-gray-200">{dimCeilingResult.metrics.mean.toFixed(2)}</span>
                 </div>
                 <div className="bg-gray-900 p-2 rounded text-center">
                   <span className="block text-gray-500">90th Percentile</span>
-                  <span className="font-bold text-gray-200">{ceilingResult.metrics.p90.toFixed(2)}</span>
+                  <span className="font-bold text-gray-200">{dimCeilingResult.metrics.p90.toFixed(2)}</span>
                 </div>
                 <div className="bg-gray-900 p-2 rounded text-center">
                   <span className="block text-gray-500">Maximum</span>
-                  <span className="font-bold text-gray-200">{ceilingResult.metrics.max.toFixed(2)}</span>
+                  <span className="font-bold text-gray-200">{dimCeilingResult.metrics.max.toFixed(2)}</span>
                 </div>
               </div>
             </div>
@@ -205,8 +192,8 @@ export const DimReduction: React.FC = () => {
             <div>
               <label className="block text-xs text-gray-400 font-semibold mb-1.5">Algorithm</label>
               <select
-                value={manualAlgo}
-                onChange={(e) => setManualAlgo(e.target.value)}
+                value={dimManualAlgo}
+                onChange={(e) => setDimManualAlgo(e.target.value)}
                 className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-indigo-500"
               >
                 {ALGORITHMS.map(algo => (
@@ -225,15 +212,15 @@ export const DimReduction: React.FC = () => {
             </button>
           </div>
 
-          {manualResult && (
+          {dimManualResult && (
             <div className="mt-6 bg-gray-950 rounded-xl p-4 border border-gray-800 flex items-center justify-between">
               <div>
                 <p className="text-xs text-gray-500">Algorithm</p>
-                <p className="font-bold text-indigo-400">{manualResult.algorithm}</p>
+                <p className="font-bold text-indigo-400">{dimManualResult.algorithm}</p>
               </div>
               <div className="text-right">
                 <p className="text-xs text-gray-500">Estimated Dimension</p>
-                <p className="font-black text-2xl text-white">{manualResult.estimated_dimension.toFixed(2)}</p>
+                <p className="font-black text-2xl text-white">{dimManualResult.estimated_dimension.toFixed(2)}</p>
               </div>
             </div>
           )}
@@ -241,7 +228,7 @@ export const DimReduction: React.FC = () => {
       </div>
 
       {/* 4. Reduction & Export */}
-      <div className={`bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-xl flex items-center justify-between ${!data ? 'opacity-50 pointer-events-none' : ''}`}>
+      <div className={`bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-xl flex items-center justify-between ${!dimData ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="flex-1 max-w-sm">
           <h3 className="text-md font-bold text-gray-200 flex items-center space-x-2 mb-2">
             <Layers className="w-5 h-5 text-amber-400" />
@@ -254,8 +241,8 @@ export const DimReduction: React.FC = () => {
               <label className="block text-xs text-gray-400 font-semibold mb-1.5">Target K</label>
               <input
                 type="number"
-                value={targetD}
-                onChange={(e) => setTargetD(parseInt(e.target.value) || 2)}
+                value={dimTargetD}
+                onChange={(e) => setDimTargetD(parseInt(e.target.value) || 2)}
                 className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-amber-500"
               />
             </div>
@@ -269,11 +256,11 @@ export const DimReduction: React.FC = () => {
           </div>
         </div>
 
-        {reducedData && (
+        {dimReducedData && (
           <div className="flex flex-col items-end">
             <div className="flex items-center space-x-2 mb-4 text-emerald-400 bg-emerald-400 bg-opacity-10 px-4 py-2 rounded-lg border border-emerald-900">
               <Database className="w-4 h-4" />
-              <span className="text-xs font-bold">Reduction Successful ({reducedData.length} x {reducedData[0].length})</span>
+              <span className="text-xs font-bold">Reduction Successful ({dimReducedData.length} x {dimReducedData[0].length})</span>
             </div>
             
             <button 
