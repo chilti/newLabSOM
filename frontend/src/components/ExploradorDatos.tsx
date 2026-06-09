@@ -1550,10 +1550,11 @@ export const ExploradorDatos: React.FC = () => {
                         <div className="absolute top-4 right-4 z-20 flex space-x-2">
                           <button
                             onClick={exportClusteredData}
-                            className="p-2 bg-gray-950 border border-emerald-900 hover:border-emerald-500 text-emerald-500 hover:text-emerald-400 rounded-xl transition cursor-pointer shadow-lg shadow-emerald-900/20"
+                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition cursor-pointer shadow-lg shadow-indigo-900/20 flex items-center space-x-2 text-[10px] font-bold uppercase tracking-wider"
                             title="Export Data with Cluster Column"
                           >
-                            <Download className="w-4 h-4" />
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Export CSV</span>
                           </button>
                           <button
                             onClick={() => openMapPopup('comp-viewport-clustering', 'Clustering Map')}
