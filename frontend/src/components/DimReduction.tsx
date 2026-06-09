@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useSomStore } from '../store/somStore';
-import { Upload, Activity, Calculator, ArrowRight, Layers, Database } from 'lucide-react';
+import { Upload, Activity, Calculator, ArrowRight, Layers, Database, RefreshCw } from 'lucide-react';
 import Papa from 'papaparse';
 
 const ALGORITHMS = [
