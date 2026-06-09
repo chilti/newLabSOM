@@ -75,6 +75,38 @@ app.MapPost("/api/som/train", async (SOMTrainingRequest request, SOMEngineServic
     return Results.Ok(result);
 });
 
+// 4. Evaluate Clustering Endpoint
+app.MapPost("/api/som/evaluate_clusters", async (EvaluateClustersRequest request, SOMEngineService engine) =>
+{
+    if (request.Weights == null || request.Weights.Count == 0)
+    {
+        return Results.BadRequest(new { success = false, error = "Weights matrix is empty or invalid." });
+    }
+    
+    var result = await engine.EvaluateClustersAsync(request);
+    if (!result.Success)
+    {
+        return Results.Json(result, statusCode: 500);
+    }
+    return Results.Ok(result);
+});
+
+// 5. UMAP Projections Endpoint
+app.MapPost("/api/som/umap", async (UmapRequest request, SOMEngineService engine) =>
+{
+    if (request.Weights == null || request.Weights.Count == 0)
+    {
+        return Results.BadRequest(new { success = false, error = "Weights matrix is empty or invalid." });
+    }
+    
+    var result = await engine.GenerateUmapAsync(request);
+    if (!result.Success)
+    {
+        return Results.Json(result, statusCode: 500);
+    }
+    return Results.Ok(result);
+});
+
 // Health check
 app.MapGet("/api/health", () => Results.Ok(new { status = "Healthy", app = "newLabSOM Local API" }));
 

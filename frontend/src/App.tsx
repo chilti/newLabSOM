@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSomStore } from './store/somStore';
 import { RedBibliometrica } from './components/RedBibliometrica';
 import { ExploradorDatos } from './components/ExploradorDatos';
-import { Database, Share2, Sliders, ArrowRight, RefreshCw, ChevronLeft, ChevronRight, Settings, Upload } from 'lucide-react';
+import { Database, Share2, Sliders, ArrowRight, RefreshCw, ChevronLeft, ChevronRight, Settings, Upload, Save, FolderOpen } from 'lucide-react';
 
 export default function App() {
   const { 
@@ -13,7 +13,9 @@ export default function App() {
     fetchSystemStatus,
     hardware,
     pendingNetworkCsv,
-    uploadProgress
+    uploadProgress,
+    exportProject,
+    importProject
   } = useSomStore();
 
   // Collapsible sidebar state
@@ -31,6 +33,7 @@ export default function App() {
   const [showTagsModal, setShowTagsModal] = useState<boolean>(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const projectInputRef = useRef<HTMLInputElement>(null);
 
   const getNetworkTypeOptions = () => {
     return [
@@ -199,6 +202,43 @@ export default function App() {
               {activeTab === 'multidimensional' && 'Load CSV datasets and train your Self-Organizing Map (SOM).'}
               {activeTab === 'bibliometrics' && 'Extract and parse scientific metrics from PubMed/WoS to build co-occurrence networks.'}
             </p>
+          </div>
+          
+          <div className="flex space-x-3">
+            <button 
+              onClick={() => projectInputRef.current?.click()}
+              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-xs font-bold rounded-xl transition flex items-center space-x-2"
+              title="Load Workspace"
+            >
+              <FolderOpen className="w-4 h-4" />
+              <span>Load Project</span>
+            </button>
+            <input
+              type="file"
+              ref={projectInputRef}
+              accept=".json,.labsom"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  const reader = new FileReader();
+                  reader.onload = (event) => {
+                    const content = event.target?.result as string;
+                    importProject(content);
+                  };
+                  reader.readAsText(file);
+                }
+              }}
+              className="hidden"
+            />
+            
+            <button 
+              onClick={() => exportProject()}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition shadow-lg shadow-indigo-900 shadow-opacity-20 flex items-center space-x-2"
+              title="Save Workspace"
+            >
+              <Save className="w-4 h-4" />
+              <span>Save Project</span>
+            </button>
           </div>
         </header>
 

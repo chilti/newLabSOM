@@ -27,8 +27,11 @@ export interface SOMConfig {
   init: 'random' | 'linear' | 'pca';
   metric: 'euclidean' | 'manhattan' | 'canberra';
   learningRate: number;
+  clusteringAlgorithm: 'agglomerative' | 'dbscan';
   nClusters: number;
-  runUmap: boolean;
+  eps: number;
+  minSamples: number;
+  umapDataSource: 'data' | 'weights';
 }
 
 export interface TrainingResult {
@@ -56,6 +59,7 @@ interface SOMState {
   config: SOMConfig;
   hardware: HardwareInfo | null;
   isTraining: boolean;
+  isGeneratingUmap: boolean;
   isPreprocessing: boolean;
   uploadProgress: number | null;
   activeTab: 'multidimensional' | 'temporal' | 'bibliometrics';
@@ -65,6 +69,7 @@ interface SOMState {
   originalDataMatrix: number[][] | null;
   normalizationInfo: NormalizationInfo | null;
   matrixOrigin: 'csv' | 'monothematic' | 'bipartite';
+  fileName: string | null;
   labels: string[];
   compNames: string[];
   
@@ -118,13 +123,16 @@ interface SOMState {
   setConfig: (config: Partial<SOMConfig>) => void;
   setActiveTab: (tab: 'multidimensional' | 'temporal' | 'bibliometrics') => void;
   fetchSystemStatus: () => Promise<void>;
-  loadCsvData: (csvText: string, labelColIndex?: number, ignoreCols?: number[], origin?: 'csv' | 'monothematic' | 'bipartite') => void;
+  loadCsvData: (csvText: string, labelColIndex?: number, ignoreCols?: number[], origin?: 'csv' | 'monothematic' | 'bipartite', fileName?: string) => void;
   applyNormalization: (type: NormalizationType) => void;
   revertNormalization: () => void;
   preprocessBibliometrics: (file: File, networkType: string, customTag?: string, maxTerms?: number, minCooc?: number, onlyMajor?: boolean, temporal?: boolean) => Promise<void>;
   trainSOM: () => Promise<boolean>;
+  generateUmap: () => Promise<boolean>;
   moveLabel: (label: string, fromBmu: number, toBmu: number) => void;
   recalculatePipeline: () => void;
+  exportProject: () => void;
+  importProject: (fileContent: string) => void;
 }
 
 const parseCSVLine = (line: string): string[] => {
@@ -187,11 +195,15 @@ export const useSomStore = create<SOMState>((set, get) => ({
     init: 'pca',
     metric: 'euclidean',
     learningRate: 0.5,
+    clusteringAlgorithm: 'dbscan',
     nClusters: 4,
-    runUmap: true,
+    eps: 1.5,
+    minSamples: 2,
+    umapDataSource: 'data',
   },
   hardware: null,
   isTraining: false,
+  isGeneratingUmap: false,
   isPreprocessing: false,
   uploadProgress: null,
   activeTab: 'bibliometrics',
@@ -200,6 +212,7 @@ export const useSomStore = create<SOMState>((set, get) => ({
   originalDataMatrix: null,
   normalizationInfo: null,
   matrixOrigin: 'csv',
+  fileName: null,
   labels: [],
   compNames: [],
   
@@ -345,7 +358,7 @@ export const useSomStore = create<SOMState>((set, get) => ({
     }
   },
 
-  loadCsvData: (csvText, labelColIndex = 0, ignoreCols = [], origin = 'csv') => {
+  loadCsvData: (csvText: string, labelColIndex = 0, ignoreCols: number[] = [], origin: 'csv' | 'monothematic' | 'bipartite' = 'csv', fileName?: string) => {
     const parsed = parseRawCsvToMatrix(csvText, labelColIndex, ignoreCols);
     if (!parsed) return;
     
@@ -354,6 +367,7 @@ export const useSomStore = create<SOMState>((set, get) => ({
       originalDataMatrix: parsed.matrix,
       normalizationInfo: null,
       matrixOrigin: origin,
+      fileName: fileName || null,
       labels: parsed.documentLabels,
       compNames: parsed.selectedHeaders,
       result: null, // clear previous results
@@ -459,8 +473,10 @@ export const useSomStore = create<SOMState>((set, get) => ({
         init: config.init,
         metric: config.metric,
         learning_rate: config.learningRate,
+        clustering_algorithm: config.clusteringAlgorithm,
         n_clusters: config.nClusters,
-        run_umap: config.runUmap,
+        eps: config.eps,
+        min_samples: config.minSamples,
         fallback_level: hardware?.level ?? 3,
         labels: labels
       };
@@ -484,8 +500,8 @@ export const useSomStore = create<SOMState>((set, get) => ({
             hexGrid: result.hex_grid,
             mappedLabels: result.mapped_labels,
             errors: result.errors,
-            umap: result.umap,
-            umapSource: result.umap_source
+            umap: get().result?.umap, // Preserve existing UMAP
+            umapSource: get().result?.umapSource
           },
           isTraining: false
         });
@@ -499,6 +515,52 @@ export const useSomStore = create<SOMState>((set, get) => ({
       console.error(e);
       alert("Local API Connection failed. Make sure the backend is booted.");
       set({ isTraining: false });
+      return false;
+    }
+  },
+
+  generateUmap: async (): Promise<boolean> => {
+    const { result, config, dataMatrix } = get();
+    if (!result || !result.weights) {
+      alert("La red debe estar entrenada para generar proyecciones UMAP.");
+      return false;
+    }
+
+    set({ isGeneratingUmap: true });
+    try {
+      const payload = {
+        weights: config.umapDataSource === 'data' ? dataMatrix : result.weights,
+        n_neighbors: 15,
+        min_dist: 0.1,
+        metric: config.metric
+      };
+
+      const res = await fetch(getApiUrl('/api/som/umap'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const resJson = await res.json();
+      if (resJson?.success) {
+        set({
+          result: {
+            ...result,
+            umap: resJson.umap,
+            umapSource: resJson.umap_source
+          },
+          isGeneratingUmap: false
+        });
+        return true;
+      } else {
+        alert("UMAP error: " + (resJson?.error || "Unknown error"));
+        set({ isGeneratingUmap: false });
+        return false;
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Local API Connection failed.");
+      set({ isGeneratingUmap: false });
       return false;
     }
   },
@@ -532,5 +594,73 @@ export const useSomStore = create<SOMState>((set, get) => ({
         }
       };
     });
+  },
+
+  exportProject: () => {
+    const state = get();
+    const projectData = {
+      version: '1.0',
+      config: state.config,
+      dataMatrix: state.dataMatrix,
+      originalDataMatrix: state.originalDataMatrix,
+      normalizationInfo: state.normalizationInfo,
+      matrixOrigin: state.matrixOrigin,
+      labels: state.labels,
+      compNames: state.compNames,
+      documentCount: state.documentCount,
+      termCounts: state.termCounts,
+      network: state.network,
+      networksByYear: state.networksByYear,
+      cooccurrenceCsv: state.cooccurrenceCsv,
+      pendingNetworkCsv: state.pendingNetworkCsv,
+      pendingNetworkOrigin: state.pendingNetworkOrigin,
+      result: state.result,
+      isCmaSmoothingActive: state.isCmaSmoothingActive,
+      cmaWindowSize: state.cmaWindowSize
+    };
+
+    const jsonString = JSON.stringify(projectData);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `labsom_project_${new Date().getTime()}.labsom`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  },
+
+  importProject: (fileContent: string) => {
+    try {
+      const projectData = JSON.parse(fileContent);
+      if (projectData.version === '1.0' || projectData.config) {
+        set({
+          config: projectData.config || get().config,
+          dataMatrix: projectData.dataMatrix || [],
+          originalDataMatrix: projectData.originalDataMatrix || null,
+          normalizationInfo: projectData.normalizationInfo || null,
+          matrixOrigin: projectData.matrixOrigin || 'csv',
+          labels: projectData.labels || [],
+          compNames: projectData.compNames || [],
+          documentCount: projectData.documentCount || 0,
+          termCounts: projectData.termCounts || {},
+          network: projectData.network || null,
+          networksByYear: projectData.networksByYear || null,
+          cooccurrenceCsv: projectData.cooccurrenceCsv || null,
+          pendingNetworkCsv: projectData.pendingNetworkCsv || null,
+          pendingNetworkOrigin: projectData.pendingNetworkOrigin || null,
+          result: projectData.result || null,
+          isCmaSmoothingActive: projectData.isCmaSmoothingActive || false,
+          cmaWindowSize: projectData.cmaWindowSize || 3
+        });
+      } else {
+        alert('Invalid or corrupted .labsom file format.');
+      }
+    } catch (e) {
+      console.error('Error importing project:', e);
+      alert('Failed to parse .labsom file.');
+    }
   }
 }));

@@ -10,6 +10,7 @@ export interface UmapPoint {
   value: number;
   label?: string;
   dataIndex?: number; // original row index in the data matrix
+  index?: number; // SOM neuron index if projected from weights
 }
 
 export interface UmapHeatmapProps {
@@ -239,13 +240,19 @@ const UmapHeatmapInner: React.FC<UmapHeatmapProps> = ({
       if (trajectories.length > 0) {
         // Build a fast lookup array for mapping from dataIndex to canvas coordinates
         // We use an array instead of a Map because dataIndex is a sequential integer (much faster)
+        // We use arrays for fast lookups
         const coordsByDataIndex: {cx: number, cy: number}[] = [];
+        const coordsByIndex: {cx: number, cy: number}[] = [];
         for (let i = 0; i < validPoints.length; i++) {
           const p = validPoints[i];
+          const cx = ((p.x - minX) / safeRangeX) * width;
+          const cy = ((p.y - minY) / safeRangeY) * height;
+          
           if (p.dataIndex !== undefined) {
-            const cx = ((p.x - minX) / safeRangeX) * width;
-            const cy = ((p.y - minY) / safeRangeY) * height;
             coordsByDataIndex[p.dataIndex] = { cx, cy };
+          }
+          if (p.index !== undefined) {
+            coordsByIndex[p.index] = { cx, cy };
           }
         }
 
@@ -257,8 +264,9 @@ const UmapHeatmapInner: React.FC<UmapHeatmapProps> = ({
 
         for (const traj of trajectories) {
           // Filter out points that might be missing from the UMAP calculation
+          // Check dataIndex first, fallback to BMU index
           const tPoints = traj.points
-            .map(p => coordsByDataIndex[p.dataIndex])
+            .map(p => coordsByDataIndex[p.dataIndex] || coordsByIndex[p.index])
             .filter(Boolean) as {cx: number, cy: number}[];
           
           if (tPoints.length > 1) {

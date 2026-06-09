@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.spatial.distance as dist
-from sklearn.cluster import AgglomerativeClustering, KMeans
+from sklearn.cluster import AgglomerativeClustering, KMeans, DBSCAN
+from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
 import sys
 import json
 import torch
@@ -166,11 +167,50 @@ class SOMSolver:
                 umatrix[i] = 0
         return umatrix.reshape((self.rows, self.cols)).tolist()
 
-    def get_clustering(self, n_clusters):
-        """Agglomerative Clustering on the SOM weights."""
-        clustering = AgglomerativeClustering(n_clusters=n_clusters, metric='euclidean', linkage='ward')
-        labels = clustering.fit_predict(self.weights.cpu().numpy())
+    def get_clustering(self, algorithm="dbscan", n_clusters=4, eps=0.5, min_samples=3):
+        """Clustering on the SOM weights."""
+        weights_np = self.weights.cpu().numpy()
+        
+        if algorithm == "dbscan":
+            from sklearn.preprocessing import StandardScaler
+            # Standardize weights so that eps has a predictable scale (e.g. 0.5 = half standard deviation)
+            scaled_weights = StandardScaler().fit_transform(weights_np)
+            clustering = DBSCAN(eps=eps, min_samples=min_samples)
+            labels = clustering.fit_predict(scaled_weights)
+        else:
+            clustering = AgglomerativeClustering(n_clusters=n_clusters, metric='euclidean', linkage='ward')
+            labels = clustering.fit_predict(weights_np)
+            
         return labels.tolist()
+
+    def evaluate_clustering(self, max_k=15):
+        """Calculates clustering metrics (Silhouette, Davies-Bouldin, Calinski-Harabasz) for k=2 to max_k."""
+        weights_np = self.weights.cpu().numpy()
+        results = []
+        # Fallback if too few neurons (unlikely for SOM)
+        if len(weights_np) < 3:
+            return results
+            
+        actual_max_k = min(max_k, len(weights_np) - 1)
+        for k in range(2, actual_max_k + 1):
+            clustering = AgglomerativeClustering(n_clusters=k, metric='euclidean', linkage='ward')
+            labels = clustering.fit_predict(weights_np)
+            
+            if len(set(labels)) > 1:
+                sil = silhouette_score(weights_np, labels)
+                db = davies_bouldin_score(weights_np, labels)
+                ch = calinski_harabasz_score(weights_np, labels)
+            else:
+                sil, db, ch = 0, 0, 0
+                
+            results.append({
+                "k": k,
+                "silhouette": float(sil),
+                "davies_bouldin": float(db),
+                "calinski_harabasz": float(ch)
+            })
+            
+        return results
 
     def get_bmus_and_frequencies(self, data):
         """Maps dataset and calculates hit frequencies and quantization errors."""
@@ -201,7 +241,7 @@ class SOMSolver:
         
         return bmus.cpu().tolist(), normalized_freq.cpu().tolist(), normalized_qe.cpu().tolist()
 
-def run_umap(data, fallback_level=3, n_components=2):
+def run_umap(data, fallback_level=3, n_components=2, n_neighbors=15, min_dist=0.1, metric="euclidean"):
     """
     Runs UMAP dimensionality reduction using the 3-level fallback mechanism.
     """
@@ -209,7 +249,7 @@ def run_umap(data, fallback_level=3, n_components=2):
     if fallback_level == 1:
         try:
             from cuml.manifold import UMAP as GPU_UMAP
-            reducer = GPU_UMAP(n_components=n_components, random_state=42)
+            reducer = GPU_UMAP(n_components=n_components, n_neighbors=n_neighbors, min_dist=min_dist, metric=metric, random_state=42)
             embedding = reducer.fit_transform(data)
             return embedding.tolist(), "Level 1: cuML GPU Acceleration"
         except Exception as e:
@@ -220,7 +260,7 @@ def run_umap(data, fallback_level=3, n_components=2):
     if fallback_level == 2:
         try:
             import umap
-            reducer = umap.UMAP(n_components=n_components, random_state=42)
+            reducer = umap.UMAP(n_components=n_components, n_neighbors=n_neighbors, min_dist=min_dist, metric=metric, random_state=42)
             embedding = reducer.fit_transform(data)
             return embedding.tolist(), "Level 2: Multicore PyTorch/ONNX Execution"
         except Exception as e:
@@ -230,7 +270,7 @@ def run_umap(data, fallback_level=3, n_components=2):
     # Level 3: CPU Fallback
     try:
         import umap
-        reducer = umap.UMAP(n_components=n_components, random_state=42)
+        reducer = umap.UMAP(n_components=n_components, n_neighbors=n_neighbors, min_dist=min_dist, metric=metric, random_state=42)
         embedding = reducer.fit_transform(data)
         return embedding.tolist(), "Level 3: CPU Fallback Universal"
     except Exception as e:

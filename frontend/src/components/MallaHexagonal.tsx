@@ -145,6 +145,10 @@ export const MallaHexagonal: React.FC<MallaHexagonalProps> = ({
       
       case 'clustering': {
         const clusterId = clustering[neuronIdx];
+        if (clusterId === -1) {
+          // DBSCAN Noise
+          return '#2d3748';
+        }
         // Dynamic golden ratio HSL generation to provide highly distinct colors
         const hue = (clusterId * 137.5) % 360;
         return chroma.hsl(hue, 0.75, 0.65).hex();

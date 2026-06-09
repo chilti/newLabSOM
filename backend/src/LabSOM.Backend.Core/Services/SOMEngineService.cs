@@ -144,9 +144,151 @@ namespace LabSOM.Backend.Core.Services
                 }
             }
         }
+    public async Task<EvaluateClustersResult> EvaluateClustersAsync(EvaluateClustersRequest request)
+    {
+        var scriptPath = Path.GetFullPath(Path.Combine(_enginePath, "main_engine.py"));
+        string tempDir = Path.GetFullPath(Path.Combine(_enginePath, "temp"));
+        if (!Directory.Exists(tempDir)) Directory.CreateDirectory(tempDir);
+        
+        string tempFile = Path.Combine(tempDir, $"som_eval_{Guid.NewGuid():N}.json");
+        
+        try
+        {
+            string jsonPayload = JsonSerializer.Serialize(request);
+            await File.WriteAllTextAsync(tempFile, jsonPayload);
+            
+            var psi = new ProcessStartInfo
+            {
+                FileName = "python",
+                Arguments = $"\"{scriptPath}\" evaluate_clusters \"{tempFile}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var process = new Process { StartInfo = psi };
+            process.Start();
+
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+            try
+            {
+                await process.WaitForExitAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                process.Kill(entireProcessTree: true);
+                return new EvaluateClustersResult { Success = false, Error = "Evaluation timed out." };
+            }
+            
+            string stdout = await stdoutTask;
+            string stderr = await stderrTask;
+
+            if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(stdout))
+            {
+                int jsonStart = stdout.IndexOf('{');
+                string jsonOnly = jsonStart > 0 ? stdout[jsonStart..] : stdout;
+                
+                try
+                {
+                    var result = JsonSerializer.Deserialize<EvaluateClustersResult>(jsonOnly, new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+                    if (result != null) return result;
+                }
+                catch (JsonException jex)
+                {
+                    return new EvaluateClustersResult { Success = false, Error = $"JSON parse error: {jex.Message}" };
+                }
+            }
+            return new EvaluateClustersResult { Success = false, Error = $"Subprocess error (exit code {process.ExitCode}). stderr: {stderr}" };
+        }
+        catch (Exception ex)
+        {
+            return new EvaluateClustersResult { Success = false, Error = $"Exception: {ex.Message}" };
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) { try { File.Delete(tempFile); } catch { } }
+        }
     }
 
-    public class SOMTrainingRequest
+    public async Task<UmapResult> GenerateUmapAsync(UmapRequest request)
+    {
+        var scriptPath = Path.GetFullPath(Path.Combine(_enginePath, "main_engine.py"));
+        string tempDir = Path.GetFullPath(Path.Combine(_enginePath, "temp"));
+        if (!Directory.Exists(tempDir)) Directory.CreateDirectory(tempDir);
+        
+        string tempFile = Path.Combine(tempDir, $"som_umap_{Guid.NewGuid():N}.json");
+        
+        try
+        {
+            string jsonPayload = JsonSerializer.Serialize(request);
+            await File.WriteAllTextAsync(tempFile, jsonPayload);
+            
+            var psi = new ProcessStartInfo
+            {
+                FileName = "python",
+                Arguments = $"\"{scriptPath}\" umap \"{tempFile}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var process = new Process { StartInfo = psi };
+            process.Start();
+
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+            try
+            {
+                await process.WaitForExitAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                process.Kill(entireProcessTree: true);
+                return new UmapResult { Success = false, Error = "UMAP generation timed out." };
+            }
+            
+            string stdout = await stdoutTask;
+            string stderr = await stderrTask;
+
+            if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(stdout))
+            {
+                int jsonStart = stdout.IndexOf('{');
+                string jsonOnly = jsonStart > 0 ? stdout[jsonStart..] : stdout;
+                
+                try
+                {
+                    var result = JsonSerializer.Deserialize<UmapResult>(jsonOnly, new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+                    if (result != null) return result;
+                }
+                catch (JsonException ex)
+                {
+                    return new UmapResult { Success = false, Error = "Failed to parse Python UMAP JSON. " + ex.Message };
+                }
+            }
+
+            return new UmapResult { Success = false, Error = "UMAP failed. Process output: " + stderr };
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) { try { File.Delete(tempFile); } catch { } }
+        }
+    }
+}
+
+public class SOMTrainingRequest
     {
         [JsonPropertyName("data")]
         public List<List<double>> Data { get; set; }
@@ -174,6 +316,15 @@ namespace LabSOM.Backend.Core.Services
         
         [JsonPropertyName("n_clusters")]
         public int N_Clusters { get; set; }
+        
+        [JsonPropertyName("clustering_algorithm")]
+        public string Clustering_Algorithm { get; set; }
+        
+        [JsonPropertyName("eps")]
+        public double Eps { get; set; }
+        
+        [JsonPropertyName("min_samples")]
+        public int Min_Samples { get; set; }
         
         [JsonPropertyName("run_umap")]
         public bool Run_Umap { get; set; }
@@ -222,6 +373,57 @@ namespace LabSOM.Backend.Core.Services
         
         [JsonPropertyName("errors")]
         public List<double> Errors { get; set; }
+        
+        [JsonPropertyName("umap")]
+        public List<List<double>> Umap { get; set; }
+        
+        [JsonPropertyName("umap_source")]
+        public string Umap_Source { get; set; }
+    }
+
+    public class EvaluateClustersRequest
+    {
+        [JsonPropertyName("weights")]
+        public List<List<double>> Weights { get; set; }
+
+        [JsonPropertyName("max_k")]
+        public int Max_K { get; set; }
+    }
+    
+    public class EvaluateClustersResult
+    {
+        [JsonPropertyName("success")]
+        public bool Success { get; set; }
+        
+        [JsonPropertyName("error")]
+        public string Error { get; set; }
+        
+        [JsonPropertyName("metrics")]
+        public List<JsonElement> Metrics { get; set; }
+    }
+
+    public class UmapRequest
+    {
+        [JsonPropertyName("weights")]
+        public List<List<double>> Weights { get; set; }
+
+        [JsonPropertyName("n_neighbors")]
+        public int N_Neighbors { get; set; }
+
+        [JsonPropertyName("min_dist")]
+        public double Min_Dist { get; set; }
+
+        [JsonPropertyName("metric")]
+        public string Metric { get; set; }
+    }
+
+    public class UmapResult
+    {
+        [JsonPropertyName("success")]
+        public bool Success { get; set; }
+        
+        [JsonPropertyName("error")]
+        public string Error { get; set; }
         
         [JsonPropertyName("umap")]
         public List<List<double>> Umap { get; set; }

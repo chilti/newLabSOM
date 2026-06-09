@@ -20,6 +20,7 @@ import {
 import { BoxPlot } from './BoxPlot';
 import { MallaHexagonal, type Trajectory } from './MallaHexagonal';
 import { UmapHeatmap } from './UmapHeatmap';
+import { ClusterMetricsModal } from './ClusterMetricsModal';
 import { parseTrajectoryEntity } from '../utils/timeSeries';
 
 export const ExploradorDatos: React.FC = () => {
@@ -29,7 +30,9 @@ export const ExploradorDatos: React.FC = () => {
     compNames, 
     result, 
     isTraining, 
-    trainSOM, 
+    trainSOM,
+    generateUmap,
+    isGeneratingUmap,
     config, 
     setConfig, 
     hardware, 
@@ -54,12 +57,14 @@ export const ExploradorDatos: React.FC = () => {
     entityColorOverrides,
     setEntityColorOverrides,
     showLabelsOnUmapScatter,
-    setShowLabelsOnUmapScatter
+    setShowLabelsOnUmapScatter,
+    fileName
   } = useSomStore();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [labelIndex, setLabelIndex] = useState(0);
   const [hoveredUmapDot, setHoveredUmapDot] = useState<number | null>(null);
+  const [showClusterMetrics, setShowClusterMetrics] = useState(false);
   
   // Navigation sub-tabs within "Data & SOM"
   const [subTab, setSubTab] = useState<'import' | 'training' | 'maps' | 'umap'>('import');
@@ -765,6 +770,47 @@ export const ExploradorDatos: React.FC = () => {
     );
   };
 
+  const renderDataPreview = (matrix: number[][], currentLabels: string[], currentCompNames: string[], title: string) => {
+    if (matrix.length === 0) return null;
+    const previewRows = Math.min(5, matrix.length);
+    const previewCols = Math.min(10, currentCompNames.length);
+    
+    return (
+      <div className="mt-4 bg-gray-950 border border-gray-800 rounded-xl overflow-hidden shadow-inner w-full">
+        <div className="bg-gray-900 border-b border-gray-800 px-3 py-1.5 flex justify-between items-center">
+          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{title}</span>
+          <span className="text-[10px] text-gray-600 italic">Showing {previewRows} of {matrix.length} rows</span>
+        </div>
+        <div className="overflow-x-auto max-w-full">
+          <table className="w-full text-left border-collapse whitespace-nowrap">
+            <thead>
+              <tr className="bg-gray-950/50">
+                <th className="p-2 text-[10px] font-bold text-gray-500 border-b border-r border-gray-800 sticky left-0 bg-gray-900 z-10">Label</th>
+                {currentCompNames.slice(0, previewCols).map((c, i) => (
+                  <th key={i} className="p-2 text-[10px] font-bold text-gray-500 border-b border-gray-800" title={c}>{c.length > 12 ? c.substring(0, 12) + '...' : c}</th>
+                ))}
+                {currentCompNames.length > previewCols && (
+                  <th className="p-2 text-[10px] italic text-gray-600 border-b border-gray-800">+{currentCompNames.length - previewCols} more...</th>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {matrix.slice(0, previewRows).map((row, rIdx) => (
+                <tr key={rIdx} className="hover:bg-gray-800 transition-colors">
+                  <td className="p-2 text-[10px] text-indigo-300 font-bold border-r border-gray-800 sticky left-0 bg-gray-950 z-10 truncate max-w-[120px]" title={currentLabels[rIdx]}>{currentLabels[rIdx]}</td>
+                  {row.slice(0, previewCols).map((val, cIdx) => (
+                    <td key={cIdx} className="p-2 text-[10px] text-gray-400 font-mono">{typeof val === 'number' ? val.toFixed(3) : val}</td>
+                  ))}
+                  {currentCompNames.length > previewCols && <td className="p-2 text-[10px] text-gray-600">...</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <>
       <div className="flex flex-col h-full space-y-6">
@@ -853,10 +899,21 @@ export const ExploradorDatos: React.FC = () => {
               </div>
 
               {dataMatrix.length > 0 ? (
-                <div className="flex items-center space-x-4 bg-gray-950 px-4 py-2 rounded-xl border border-gray-850 text-xs text-gray-400">
-                  <span className="flex items-center"><Database className="w-3.5 h-3.5 mr-1.5 text-indigo-400" /> Matrix: <strong className="text-gray-200 ml-1">{dataMatrix.length} rows</strong></span>
-                  <span className="text-gray-700">|</span>
-                  <span className="flex items-center"><Sliders className="w-3.5 h-3.5 mr-1.5 text-emerald-400" /> Features: <strong className="text-gray-200 ml-1">{compNames.length}</strong></span>
+                <div className="flex flex-col gap-2 w-full">
+                  <div className="flex items-center space-x-4 bg-gray-950 px-4 py-2 rounded-xl border border-gray-850 text-xs text-gray-400 self-start">
+                    {fileName && (
+                      <>
+                        <span className="text-indigo-300 font-bold max-w-[200px] truncate" title={fileName}>
+                          {fileName}
+                        </span>
+                        <span className="text-gray-700">|</span>
+                      </>
+                    )}
+                    <span className="flex items-center"><Database className="w-3.5 h-3.5 mr-1.5 text-indigo-400" /> Matrix: <strong className="text-gray-200 ml-1">{dataMatrix.length} rows</strong></span>
+                    <span className="text-gray-700">|</span>
+                    <span className="flex items-center"><Sliders className="w-3.5 h-3.5 mr-1.5 text-emerald-400" /> Features: <strong className="text-gray-200 ml-1">{compNames.length}</strong></span>
+                  </div>
+                  {originalDataMatrix && renderDataPreview(originalDataMatrix, labels, compNames, "Raw Dataset Preview")}
                 </div>
               ) : (
                 <span className="text-xs text-gray-500">No CSV file loaded currently. Please select a local CSV source.</span>
@@ -905,6 +962,12 @@ export const ExploradorDatos: React.FC = () => {
                             className="flex-1 px-3 py-2 bg-gray-950 border border-gray-800 hover:border-indigo-500 text-gray-300 text-xs font-semibold rounded-xl transition"
                           >
                             Division by Max
+                          </button>
+                          <button
+                            onClick={() => applyNormalization('min_max')}
+                            className="flex-1 px-3 py-2 bg-gray-950 border border-gray-800 hover:border-indigo-500 text-gray-300 text-xs font-semibold rounded-xl transition"
+                          >
+                            Min-Max Scaling
                           </button>
                           <button
                             onClick={() => applyNormalization('z_score')}
@@ -974,6 +1037,8 @@ export const ExploradorDatos: React.FC = () => {
                       </div>
                     )}
                   </div>
+                  
+                  {renderDataPreview(dataMatrix, labels, compNames, "Normalized Data Preview")}
                 </div>
               )}
 
@@ -1122,14 +1187,52 @@ export const ExploradorDatos: React.FC = () => {
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-xs text-gray-400 font-semibold mb-1.5">Clustering Target (No. Clusters)</label>
-                    <input
-                      type="number"
-                      value={config.nClusters}
-                      onChange={(e) => setConfig({ nClusters: parseInt(e.target.value) || 2 })}
-                      className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-indigo-500"
-                    />
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs text-gray-400 font-semibold mb-1.5">Clustering Algorithm</label>
+                      <select
+                        value={config.clusteringAlgorithm || 'dbscan'}
+                        onChange={(e) => setConfig({ clusteringAlgorithm: e.target.value as any })}
+                        className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="dbscan">DBSCAN (Density-Based)</option>
+                        <option value="agglomerative">Agglomerative (Ward)</option>
+                      </select>
+                    </div>
+
+                    {config.clusteringAlgorithm === 'agglomerative' ? (
+                      <div>
+                        <label className="block text-xs text-gray-400 font-semibold mb-1.5">Target Clusters (K)</label>
+                        <input
+                          type="number"
+                          value={config.nClusters}
+                          onChange={(e) => setConfig({ nClusters: parseInt(e.target.value) || 2 })}
+                          className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex space-x-2">
+                        <div className="flex-1">
+                          <label className="block text-xs text-gray-400 font-semibold mb-1.5">Epsilon (eps)</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={config.eps || 1.5}
+                            onChange={(e) => setConfig({ eps: parseFloat(e.target.value) || 1.5 })}
+                            className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-indigo-500"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <label className="block text-xs text-gray-400 font-semibold mb-1.5">Min Samples</label>
+                          <input
+                            type="number"
+                            value={config.minSamples || 2}
+                            onChange={(e) => setConfig({ minSamples: parseInt(e.target.value) || 2 })}
+                            className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-indigo-500"
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1174,17 +1277,7 @@ export const ExploradorDatos: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between border-t border-gray-800 pt-5">
-                <label className="flex items-center space-x-2 text-xs text-gray-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={config.runUmap}
-                    onChange={(e) => setConfig({ runUmap: e.target.checked })}
-                    className="w-4 h-4 bg-gray-800 border-gray-700 rounded text-indigo-500 focus:ring-indigo-500"
-                  />
-                  <span className="font-bold">Generate 2D UMAP Projections (Post-Training)</span>
-                </label>
-
+              <div className="flex flex-col items-end border-t border-gray-800 pt-5 space-y-4">
                 <button
                   onClick={async () => {
                     const success = await trainSOM();
@@ -1204,6 +1297,17 @@ export const ExploradorDatos: React.FC = () => {
                     <span>Train SOM Grid</span>
                   )}
                 </button>
+                {config.clusteringAlgorithm === 'agglomerative' && (
+                  <button
+                    onClick={() => setShowClusterMetrics(true)}
+                    disabled={!result || dataMatrix.length === 0}
+                    title="Train the SOM first to calculate clustering metrics"
+                    className="px-6 py-3.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-xs font-black uppercase tracking-wider rounded-xl transition flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50 w-full md:w-auto"
+                  >
+                    <Activity className="w-4 h-4" />
+                    <span>Analyze Optimal Clusters</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1420,7 +1524,9 @@ export const ExploradorDatos: React.FC = () => {
                           </button>
                         </div>
                         <div className="mb-2">
-                          <h4 className="text-xs font-black uppercase text-gray-300">K-Means Cluster Groups</h4>
+                          <h4 className="text-xs font-black uppercase text-gray-300">
+                            {config.clusteringAlgorithm === 'agglomerative' ? 'Agglomerative Clusters' : 'DBSCAN Clusters'}
+                          </h4>
                           <p className="text-[10px] text-gray-500 mt-0.5">Partition grid nodes based on similarity centers.</p>
                         </div>
                         <div className="flex-1 min-h-0">
@@ -1534,6 +1640,45 @@ export const ExploradorDatos: React.FC = () => {
         {/* SUBTAB 4: RESPONSIVE UMAP scatterplot */}
         {subTab === 'umap' && (
           <div className="space-y-6">
+            <div className="flex justify-between items-center bg-gray-900 border border-gray-800 p-4 rounded-xl shadow-inner">
+              <div className="flex-1 max-w-md">
+                <label className="block text-xs text-gray-400 font-semibold mb-2">UMAP Data Source</label>
+                <select
+                  value={config.umapDataSource || 'data'}
+                  onChange={(e) => setConfig({ umapDataSource: e.target.value as any })}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3.5 py-2.5 text-xs text-gray-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  <option value="data">Original Data Matrix (High Detail)</option>
+                  <option value="weights">SOM Neuron Weights (Fast Outline)</option>
+                </select>
+                <p className="text-[10px] text-gray-500 mt-2">
+                  {config.umapDataSource === 'data' 
+                    ? "Projects all original documents into 2D space. Best for accurate labels and trajectories."
+                    : "Projects only the trained SOM neurons. Faster, but abstracts individual documents."}
+                </p>
+              </div>
+
+              <div className="flex justify-end pl-6">
+                <button
+                  onClick={generateUmap}
+                  disabled={isGeneratingUmap || !result || !result.weights}
+                  className="px-6 py-3.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-800 disabled:text-gray-600 text-white text-xs font-black uppercase tracking-wider rounded-xl transition flex items-center justify-center space-x-2 shadow-lg shadow-indigo-900 shadow-opacity-30 cursor-pointer"
+                >
+                  {isGeneratingUmap ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Generating UMAP...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Activity className="w-4 h-4" />
+                      <span>Generate UMAP Projections</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
             {result && result.umap ? (
               <>
                 {renderUmapScatter()}
@@ -1628,14 +1773,29 @@ export const ExploradorDatos: React.FC = () => {
                       const baseMatrix = originalDataMatrix || dataMatrix;
                       const points = result.umap!
                         .map((coords, i) => {
-                          const val = baseMatrix[i] ? baseMatrix[i][globalIdx] : undefined;
-                          return {
-                            x: coords[0],
-                            y: coords[1],
-                            value: val,
-                            label: labels[i],
-                            dataIndex: i
-                          };
+                          if (config.umapDataSource === 'weights') {
+                            // Map over Neurons (result.weights)
+                            const val = result.weights[i] ? result.weights[i][globalIdx] : undefined;
+                            // Concat all labels for this BMU
+                            const bmuLabels = result.mappedLabels && result.mappedLabels[i] ? result.mappedLabels[i].join(', ') : '';
+                            return {
+                              x: coords[0],
+                              y: coords[1],
+                              value: val,
+                              label: bmuLabels,
+                              index: i // specific to trajectory neuron mapping
+                            };
+                          } else {
+                            // Map over Original Data (dataMatrix)
+                            const val = baseMatrix[i] ? baseMatrix[i][globalIdx] : undefined;
+                            return {
+                              x: coords[0],
+                              y: coords[1],
+                              value: val,
+                              label: labels[i],
+                              dataIndex: i
+                            };
+                          }
                         })
                         .filter(p => typeof p.value === 'number' && !isNaN(p.value)) as any[];
 
@@ -1740,7 +1900,7 @@ export const ExploradorDatos: React.FC = () => {
                 <div className="bg-gray-900 border border-gray-800 rounded-2xl p-12 shadow-2xl flex flex-col items-center justify-center text-gray-400 text-center max-w-xl mx-auto">
                   <Activity className="w-12 h-12 mb-4 text-gray-700 animate-pulse" />
                   <p className="text-lg font-medium text-gray-200">UMAP Projections unavailable</p>
-                  <p className="text-sm mt-1 max-w-sm">Please ensure the "Generate 2D UMAP Projections" checkbox is active in the Training parameters before running the solver.</p>
+                  <p className="text-sm mt-1 max-w-sm">Click "Generate UMAP Projections" to generate a non-linear 2D layout based on the SOM's high-dimensional structure.</p>
                 </div>
               )}
             </div>
@@ -1748,6 +1908,9 @@ export const ExploradorDatos: React.FC = () => {
         </div>
       </div>
 
+      {showClusterMetrics && (
+        <ClusterMetricsModal onClose={() => setShowClusterMetrics(false)} />
+      )}
     </>
   );
 };

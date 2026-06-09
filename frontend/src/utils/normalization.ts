@@ -1,5 +1,6 @@
 export type NormalizationType = 
   | 'div_max' 
+  | 'min_max'
   | 'z_score' 
   | 'cooc_cosine' 
   | 'cooc_association' 
@@ -52,6 +53,42 @@ export const divideByMax = (matrix: number[][]): NormalizationResult => {
     scalerInfo: {
       type: 'div_max',
       params: { maxValues: safeMaxValues }
+    }
+  };
+};
+
+export const minMaxScale = (matrix: number[][]): NormalizationResult => {
+  if (!matrix || matrix.length === 0) return { normalizedMatrix: [], scalerInfo: { type: 'min_max', params: {} } };
+
+  const cols = matrix[0].length;
+  const maxValues = new Array(cols).fill(Number.NEGATIVE_INFINITY);
+  const minValues = new Array(cols).fill(Number.POSITIVE_INFINITY);
+
+  for (let r = 0; r < matrix.length; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (matrix[r][c] > maxValues[c]) maxValues[c] = matrix[r][c];
+      if (matrix[r][c] < minValues[c]) minValues[c] = matrix[r][c];
+    }
+  }
+
+  const ranges = new Array(cols);
+  for (let c = 0; c < cols; c++) {
+    const range = maxValues[c] - minValues[c];
+    ranges[c] = range === 0 ? 1 : range; // Prevent division by zero
+  }
+
+  const normalizedMatrix = cloneMatrix(matrix);
+  for (let r = 0; r < matrix.length; r++) {
+    for (let c = 0; c < cols; c++) {
+      normalizedMatrix[r][c] = (matrix[r][c] - minValues[c]) / ranges[c];
+    }
+  }
+
+  return {
+    normalizedMatrix,
+    scalerInfo: {
+      type: 'min_max',
+      params: { minValues, maxValues, ranges }
     }
   };
 };
@@ -262,6 +299,7 @@ export const bipartiteSymNormalization = (matrix: number[][]): NormalizationResu
 export const applyNormalizationToMatrix = (matrix: number[][], type: NormalizationType): NormalizationResult => {
   switch (type) {
     case 'div_max': return divideByMax(matrix);
+    case 'min_max': return minMaxScale(matrix);
     case 'z_score': return zScoreStandardize(matrix);
     case 'cooc_cosine': return cosineCooccurrence(matrix);
     case 'cooc_association': return associationStrengthCooccurrence(matrix);

@@ -52,7 +52,10 @@ def handle_train(params):
     init_type = params.get("init", "random").lower() # "random", "linear" or "pca"
     metric = params.get("metric", "euclidean").lower()
     learning_rate = params.get("learning_rate", 0.5)
-    n_clusters = params.get("n_clusters", 5)
+    clustering_algorithm = params.get("clustering_algorithm", "dbscan").lower()
+    n_clusters = params.get("n_clusters", 4)
+    eps = params.get("eps", 0.5)
+    min_samples = params.get("min_samples", 3)
     run_umap_flag = params.get("run_umap", False)
     fallback_level = params.get("fallback_level", 3)
     labels = params.get("labels", [])
@@ -70,7 +73,7 @@ def handle_train(params):
             
         # Get metrics
         umatrix = solver.get_umatrix()
-        clustering = solver.get_clustering(n_clusters)
+        clustering = solver.get_clustering(algorithm=clustering_algorithm, n_clusters=n_clusters, eps=eps, min_samples=min_samples)
         bmus, frequencies, quantization_errors = solver.get_bmus_and_frequencies(data)
         
         # Prepare 2D coordinates for visual hex map rendering
@@ -124,6 +127,49 @@ def handle_train(params):
             "traceback": traceback.format_exc()
         }
 
+def handle_evaluate_clusters(params):
+    weights_list = params.get("weights", [])
+    if not weights_list:
+        return {"success": False, "error": "No weights provided."}
+    
+    max_k = params.get("max_k", 15)
+    
+    try:
+        solver = SOMSolver(1, len(weights_list), len(weights_list[0]))
+        import torch
+        solver.weights = torch.tensor(weights_list, dtype=torch.float32, device=solver.device)
+        
+        results = solver.evaluate_clustering(max_k=max_k)
+        return {"success": True, "metrics": results}
+    except Exception as e:
+        import traceback
+        return {"success": False, "error": f"Evaluation error: {str(e)}", "traceback": traceback.format_exc()}
+
+def handle_umap(params):
+    import torch
+    from som_solver import run_umap
+    
+    weights_list = params.get("weights", [])
+    if not weights_list:
+        return {"success": False, "error": "No weights provided."}
+        
+    n_neighbors = params.get("n_neighbors", 15)
+    min_dist = params.get("min_dist", 0.1)
+    metric = params.get("metric", "euclidean")
+    
+    try:
+        data = torch.tensor(weights_list, dtype=torch.float32)
+        # Using fallback_level 3 for safety on potentially large inputs in python context
+        umap_embedding, umap_source = run_umap(data, fallback_level=3, n_components=2, n_neighbors=n_neighbors, min_dist=min_dist, metric=metric)
+        return {
+            "success": True,
+            "umap": umap_embedding,
+            "umap_source": umap_source
+        }
+    except Exception as e:
+        import traceback
+        return {"success": False, "error": f"UMAP error: {str(e)}", "traceback": traceback.format_exc()}
+
 def main():
     # We allow feeding parameters via a temporary JSON file path to avoid OS command-line character limits
     if len(sys.argv) < 2:
@@ -159,8 +205,12 @@ def main():
         res = handle_preprocess(params)
     elif action == "train":
         res = handle_train(params)
+    elif action == "evaluate_clusters":
+        res = handle_evaluate_clusters(params)
+    elif action == "umap":
+        res = handle_umap(params)
     else:
-        res = {"success": False, "error": f"Unknown action: '{action}'"}
+        res = {"success": False, "error": f"Unknown action: {action}"}
         
     print(json.dumps(res))
 
