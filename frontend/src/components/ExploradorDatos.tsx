@@ -185,6 +185,7 @@ export const ExploradorDatos: React.FC = () => {
       const json = await res.json();
       if (json.success && json.clustering) {
         reclusterLocally(json.clustering);
+        setSubTab('maps');
       } else {
         const errMsg = json.error || json.title || json.detail || JSON.stringify(json);
         alert(typeof errMsg === 'string' ? errMsg : "Failed to re-cluster");
