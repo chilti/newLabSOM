@@ -49,7 +49,8 @@ export const ClusterMetricsModal: React.FC<Props> = ({ onClose }) => {
         if (json.success) {
           setData(json.metrics);
         } else {
-          setError(json.error || "Unknown error occurred while evaluating clusters.");
+          const errMsg = json.error || json.title || json.detail || JSON.stringify(json);
+          setError(typeof errMsg === 'string' ? errMsg : "Unknown error occurred while evaluating clusters.");
         }
       } catch (e: any) {
         setError(e.message || "Network error");

@@ -12,6 +12,12 @@ builder.Services.AddSingleton<HardwareDetectorService>();
 builder.Services.AddSingleton<PreprocessService>();
 builder.Services.AddSingleton<SOMEngineService>();
 
+// Allow large matrices (e.g. for SOM Weights)
+builder.Services.Configure<Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions>(options =>
+{
+    options.Limits.MaxRequestBodySize = int.MaxValue; 
+});
+
 // Enable CORS for local SPA frontends (Vite runs on localhost)
 builder.Services.AddCors();
 
