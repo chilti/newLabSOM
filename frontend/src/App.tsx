@@ -175,7 +175,7 @@ export default function App() {
                 isSidebarCollapsed ? 'justify-center px-0 py-3' : 'justify-between px-4 py-3'
               } rounded-xl text-sm font-semibold transition-all ${
                 activeTab === 'dimreduction'
-                  ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-950 shadow-opacity-50'
+                  ? 'bg-indigo-600 text-white shadow-lg'
                   : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
               }`}
             >

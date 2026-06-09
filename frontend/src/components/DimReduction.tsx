@@ -158,7 +158,7 @@ export const DimReduction: React.FC = () => {
           <button 
             onClick={runCeiling}
             disabled={isEstimatingCeiling}
-            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
+            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
           >
             {isEstimatingCeiling ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Activity className="w-4 h-4" />}
             <span>Calculate Intrinsic Ceiling</span>
@@ -218,7 +218,7 @@ export const DimReduction: React.FC = () => {
             <button 
               onClick={runManual}
               disabled={isEstimatingManual}
-              className="w-full bg-blue-800 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-colors border border-blue-700 disabled:opacity-50 flex items-center justify-center space-x-2"
+              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-colors border border-indigo-500 disabled:opacity-50 flex items-center justify-center space-x-2"
             >
               {isEstimatingManual ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Calculator className="w-4 h-4" />}
               <span>Estimate Global ID</span>
@@ -262,7 +262,7 @@ export const DimReduction: React.FC = () => {
             <button 
               onClick={runUMAP}
               disabled={isReducing}
-              className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl transition-colors disabled:opacity-50 flex items-center space-x-2 shadow-lg shadow-blue-900 shadow-opacity-20"
+              className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-xl transition-colors disabled:opacity-50 flex items-center space-x-2 shadow-lg"
             >
               {isReducing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <span>Reduce</span>}
             </button>
@@ -278,7 +278,7 @@ export const DimReduction: React.FC = () => {
             
             <button 
               onClick={sendToSOM}
-              className="px-6 py-3 bg-blue-500 hover:bg-blue-400 text-white font-bold rounded-xl transition-colors shadow-lg shadow-blue-900 shadow-opacity-30 flex items-center space-x-2"
+              className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-colors shadow-lg flex items-center space-x-2"
             >
               <span>Send Matrix to Data & SOM Pipeline</span>
               <ArrowRight className="w-4 h-4" />
