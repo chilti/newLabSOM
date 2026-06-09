@@ -191,6 +191,104 @@ def handle_umap(params):
         import traceback
         return {"success": False, "error": f"UMAP error: {str(e)}", "traceback": traceback.format_exc()}
 
+def handle_estimate_dim(params):
+    data_list = params.get("data", [])
+    if not data_list:
+        return {"success": False, "error": "No data provided."}
+    
+    mode = params.get("mode", "ceiling")
+    algorithm = params.get("algorithmName", "MLE")
+    
+    try:
+        import numpy as np
+        import skdim
+        
+        X = np.array(data_list, dtype=np.float32)
+        
+        if mode == "ceiling":
+            # Optimal Strategy: Local MLE fit_pw
+            model = skdim.id.MLE()
+            model.fit_pw(X)
+            # local dimensions
+            local_dims = model.dimension_pw_
+            
+            # calculate percentiles
+            p50 = float(np.percentile(local_dims, 50))
+            p90 = float(np.percentile(local_dims, 90))
+            p95 = float(np.percentile(local_dims, 95))
+            p_max = float(np.max(local_dims))
+            p_mean = float(np.mean(local_dims))
+            
+            return {
+                "success": True,
+                "mode": "ceiling",
+                "estimated_dimension": p95, # recommend 95th percentile
+                "metrics": {
+                    "mean": p_mean,
+                    "median": p50,
+                    "p90": p90,
+                    "p95": p95,
+                    "max": p_max
+                }
+            }
+        else:
+            # Manual Mode
+            estimator_map = {
+                "CorrInt": skdim.id.CorrInt,
+                "DANCo": skdim.id.DANCo,
+                "ESS": skdim.id.ESS,
+                "FisherS": skdim.id.FisherS,
+                "KNN": skdim.id.KNN,
+                "lPCA": skdim.id.lPCA,
+                "MADA": skdim.id.MADA,
+                "MiND_ML": skdim.id.MiND_ML,
+                "MLE": skdim.id.MLE,
+                "MOM": skdim.id.MOM,
+                "TLE": skdim.id.TLE,
+                "TwoNN": skdim.id.TwoNN
+            }
+            
+            if algorithm not in estimator_map:
+                return {"success": False, "error": f"Unknown skdim algorithm: {algorithm}"}
+            
+            model = estimator_map[algorithm]()
+            # Some global estimators fail on very large or collinear data
+            model.fit(X)
+            
+            return {
+                "success": True,
+                "mode": "manual",
+                "algorithm": algorithm,
+                "estimated_dimension": float(model.dimension_)
+            }
+            
+    except Exception as e:
+        import traceback
+        return {"success": False, "error": f"Estimation error: {str(e)}", "traceback": traceback.format_exc()}
+
+def handle_reduce_dim(params):
+    data_list = params.get("data", [])
+    if not data_list:
+        return {"success": False, "error": "No data provided."}
+    
+    target_d = params.get("target_d", 2)
+    
+    try:
+        import numpy as np
+        import umap
+        
+        X = np.array(data_list, dtype=np.float32)
+        reducer = umap.UMAP(n_components=target_d, random_state=42)
+        X_reduced = reducer.fit_transform(X)
+        
+        return {
+            "success": True,
+            "reduced_data": X_reduced.tolist()
+        }
+    except Exception as e:
+        import traceback
+        return {"success": False, "error": f"Reduction error: {str(e)}", "traceback": traceback.format_exc()}
+
 def main():
     # We allow feeding parameters via a temporary JSON file path to avoid OS command-line character limits
     if len(sys.argv) < 2:
@@ -232,6 +330,10 @@ def main():
         res = handle_recluster(params)
     elif action == "umap":
         res = handle_umap(params)
+    elif action == "estimate_dim":
+        res = handle_estimate_dim(params)
+    elif action == "reduce_dim":
+        res = handle_reduce_dim(params)
     else:
         res = {"success": False, "error": f"Unknown action: {action}"}
         

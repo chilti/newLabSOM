@@ -359,7 +359,155 @@ namespace LabSOM.Backend.Core.Services
             if (File.Exists(tempFile)) { try { File.Delete(tempFile); } catch { } }
         }
     }
-}
+
+    public async Task<EstimateDimensionResult> EstimateDimensionAsync(EstimateDimensionRequest request)
+        {
+            var scriptPath = Path.GetFullPath(Path.Combine(_enginePath, "main_engine.py"));
+            string tempDir = Path.GetFullPath(Path.Combine(_enginePath, "temp"));
+            if (!Directory.Exists(tempDir)) Directory.CreateDirectory(tempDir);
+            
+            string tempFile = Path.Combine(tempDir, $"dim_est_{Guid.NewGuid():N}.json");
+            
+            try
+            {
+                string jsonPayload = JsonSerializer.Serialize(request);
+                await File.WriteAllTextAsync(tempFile, jsonPayload);
+                
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "python",
+                    Arguments = $"\"{scriptPath}\" estimate_dim \"{tempFile}\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = new Process { StartInfo = psi };
+                process.Start();
+
+                var stdoutTask = process.StandardOutput.ReadToEndAsync();
+                var stderrTask = process.StandardError.ReadToEndAsync();
+                
+                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+                try
+                {
+                    await process.WaitForExitAsync(cts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    process.Kill(entireProcessTree: true);
+                    return new EstimateDimensionResult { Success = false, Error = "Estimation timed out." };
+                }
+                
+                string stdout = await stdoutTask;
+                string stderr = await stderrTask;
+
+                if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(stdout))
+                {
+                    int jsonStart = stdout.IndexOf('{');
+                    string jsonOnly = jsonStart > 0 ? stdout[jsonStart..] : stdout;
+                    
+                    try
+                    {
+                        var result = JsonSerializer.Deserialize<EstimateDimensionResult>(jsonOnly, new JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true
+                        });
+                        if (result != null) return result;
+                    }
+                    catch (JsonException jex)
+                    {
+                        return new EstimateDimensionResult { Success = false, Error = $"JSON parse error: {jex.Message}" };
+                    }
+                }
+
+                return new EstimateDimensionResult { Success = false, Error = $"Process failed: {stderr}" };
+            }
+            catch (Exception ex)
+            {
+                return new EstimateDimensionResult { Success = false, Error = ex.Message };
+            }
+            finally
+            {
+                if (File.Exists(tempFile)) File.Delete(tempFile);
+            }
+        }
+
+        public async Task<ReduceDimensionResult> ReduceDimensionAsync(ReduceDimensionRequest request)
+        {
+            var scriptPath = Path.GetFullPath(Path.Combine(_enginePath, "main_engine.py"));
+            string tempDir = Path.GetFullPath(Path.Combine(_enginePath, "temp"));
+            if (!Directory.Exists(tempDir)) Directory.CreateDirectory(tempDir);
+            
+            string tempFile = Path.Combine(tempDir, $"dim_red_{Guid.NewGuid():N}.json");
+            
+            try
+            {
+                string jsonPayload = JsonSerializer.Serialize(request);
+                await File.WriteAllTextAsync(tempFile, jsonPayload);
+                
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "python",
+                    Arguments = $"\"{scriptPath}\" reduce_dim \"{tempFile}\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = new Process { StartInfo = psi };
+                process.Start();
+
+                var stdoutTask = process.StandardOutput.ReadToEndAsync();
+                var stderrTask = process.StandardError.ReadToEndAsync();
+                
+                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+                try
+                {
+                    await process.WaitForExitAsync(cts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    process.Kill(entireProcessTree: true);
+                    return new ReduceDimensionResult { Success = false, Error = "Reduction timed out." };
+                }
+                
+                string stdout = await stdoutTask;
+                string stderr = await stderrTask;
+
+                if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(stdout))
+                {
+                    int jsonStart = stdout.IndexOf('{');
+                    string jsonOnly = jsonStart > 0 ? stdout[jsonStart..] : stdout;
+                    
+                    try
+                    {
+                        var result = JsonSerializer.Deserialize<ReduceDimensionResult>(jsonOnly, new JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true
+                        });
+                        if (result != null) return result;
+                    }
+                    catch (JsonException jex)
+                    {
+                        return new ReduceDimensionResult { Success = false, Error = $"JSON parse error: {jex.Message}" };
+                    }
+                }
+
+                return new ReduceDimensionResult { Success = false, Error = $"Process failed: {stderr}" };
+            }
+            catch (Exception ex)
+            {
+                return new ReduceDimensionResult { Success = false, Error = ex.Message };
+            }
+            finally
+            {
+                if (File.Exists(tempFile)) File.Delete(tempFile);
+            }
+        }
+    }
 
 public class SOMTrainingRequest
     {
@@ -533,5 +681,59 @@ public class SOMTrainingRequest
         
         [JsonPropertyName("clustering")]
         public List<int> Clustering { get; set; }
+    }
+
+    public class EstimateDimensionRequest
+    {
+        [JsonPropertyName("data")]
+        public List<List<double>> Data { get; set; }
+
+        [JsonPropertyName("mode")]
+        public string Mode { get; set; }
+
+        [JsonPropertyName("algorithmName")]
+        public string AlgorithmName { get; set; }
+    }
+
+    public class EstimateDimensionResult
+    {
+        [JsonPropertyName("success")]
+        public bool Success { get; set; }
+        
+        [JsonPropertyName("error")]
+        public string Error { get; set; }
+
+        [JsonPropertyName("mode")]
+        public string Mode { get; set; }
+
+        [JsonPropertyName("estimated_dimension")]
+        public double EstimatedDimension { get; set; }
+
+        [JsonPropertyName("algorithm")]
+        public string Algorithm { get; set; }
+
+        [JsonPropertyName("metrics")]
+        public Dictionary<string, double> Metrics { get; set; }
+    }
+
+    public class ReduceDimensionRequest
+    {
+        [JsonPropertyName("data")]
+        public List<List<double>> Data { get; set; }
+
+        [JsonPropertyName("target_d")]
+        public int Target_D { get; set; }
+    }
+
+    public class ReduceDimensionResult
+    {
+        [JsonPropertyName("success")]
+        public bool Success { get; set; }
+        
+        [JsonPropertyName("error")]
+        public string Error { get; set; }
+
+        [JsonPropertyName("reduced_data")]
+        public List<List<double>> ReducedData { get; set; }
     }
 }

@@ -129,6 +129,38 @@ app.MapPost("/api/som/umap", async (UmapRequest request, SOMEngineService engine
     return Results.Ok(result);
 });
 
+// 6. Dimension Estimation Endpoint
+app.MapPost("/api/dim/estimate", async (EstimateDimensionRequest request, SOMEngineService engine) =>
+{
+    if (request.Data == null || request.Data.Count == 0)
+    {
+        return Results.BadRequest(new { success = false, error = "Data matrix is empty or invalid." });
+    }
+    
+    var result = await engine.EstimateDimensionAsync(request);
+    if (!result.Success)
+    {
+        return Results.Json(result, statusCode: 500);
+    }
+    return Results.Ok(result);
+});
+
+// 7. Dimension Reduction Endpoint
+app.MapPost("/api/dim/reduce", async (ReduceDimensionRequest request, SOMEngineService engine) =>
+{
+    if (request.Data == null || request.Data.Count == 0)
+    {
+        return Results.BadRequest(new { success = false, error = "Data matrix is empty or invalid." });
+    }
+    
+    var result = await engine.ReduceDimensionAsync(request);
+    if (!result.Success)
+    {
+        return Results.Json(result, statusCode: 500);
+    }
+    return Results.Ok(result);
+});
+
 // Health check
 app.MapGet("/api/health", () => Results.Ok(new { status = "Healthy", app = "newLabSOM Local API" }));
 

@@ -62,7 +62,7 @@ interface SOMState {
   isGeneratingUmap: boolean;
   isPreprocessing: boolean;
   uploadProgress: number | null;
-  activeTab: 'multidimensional' | 'temporal' | 'bibliometrics';
+  activeTab: 'multidimensional' | 'temporal' | 'bibliometrics' | 'dimreduction';
   
   // Data
   dataMatrix: number[][];
@@ -121,7 +121,7 @@ interface SOMState {
   
   // Setters & Actions
   setConfig: (config: Partial<SOMConfig>) => void;
-  setActiveTab: (tab: 'multidimensional' | 'temporal' | 'bibliometrics') => void;
+  setActiveTab: (tab: 'multidimensional' | 'temporal' | 'bibliometrics' | 'dimreduction') => void;
   fetchSystemStatus: () => Promise<void>;
   loadCsvData: (csvText: string, labelColIndex?: number, ignoreCols?: number[], origin?: 'csv' | 'monothematic' | 'bipartite', fileName?: string) => void;
   applyNormalization: (type: NormalizationType) => void;
@@ -134,6 +134,8 @@ interface SOMState {
   reclusterLocally: (clustering: number[]) => void;
   exportProject: () => void;
   importProject: (fileContent: string) => void;
+  estimateDimension: (data: number[][], mode: 'ceiling' | 'manual', algorithmName?: string) => Promise<any>;
+  reduceDimension: (data: number[][], targetD: number) => Promise<any>;
 }
 
 const parseCSVLine = (line: string): string[] => {
@@ -675,6 +677,34 @@ export const useSomStore = create<SOMState>((set, get) => ({
     } catch (e) {
       console.error('Error importing project:', e);
       alert('Failed to parse .labsom file.');
+    }
+  },
+
+  estimateDimension: async (data: number[][], mode: 'ceiling' | 'manual', algorithmName?: string) => {
+    try {
+      const res = await fetch(getApiUrl('/api/dim/estimate'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data, mode, algorithmName })
+      });
+      const json = await res.json();
+      return json;
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  },
+
+  reduceDimension: async (data: number[][], targetD: number) => {
+    try {
+      const res = await fetch(getApiUrl('/api/dim/reduce'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data, target_d: targetD })
+      });
+      const json = await res.json();
+      return json;
+    } catch (error: any) {
+      return { success: false, error: error.message };
     }
   }
 }));
