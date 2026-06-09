@@ -26,6 +26,9 @@ export const DimReduction: React.FC = () => {
   const [isReducing, setIsReducing] = useState(false);
   const [reducedData, setReducedData] = useState<number[][] | null>(null);
 
+  // Error State
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -54,12 +57,13 @@ export const DimReduction: React.FC = () => {
   const runCeiling = async () => {
     if (!data) return;
     setIsEstimatingCeiling(true);
+    setErrorMessage(null);
     const res = await estimateDimension(data, 'ceiling');
     if (res.success) {
       setCeilingResult(res);
       setTargetD(Math.ceil(res.estimated_dimension));
     } else {
-      alert("Error: " + res.error);
+      setErrorMessage("Ceiling Estimation Error: " + res.error);
     }
     setIsEstimatingCeiling(false);
   };
@@ -67,11 +71,12 @@ export const DimReduction: React.FC = () => {
   const runManual = async () => {
     if (!data) return;
     setIsEstimatingManual(true);
+    setErrorMessage(null);
     const res = await estimateDimension(data, 'manual', manualAlgo);
     if (res.success) {
       setManualResult(res);
     } else {
-      alert("Error: " + res.error);
+      setErrorMessage("Manual Estimation Error: " + res.error);
     }
     setIsEstimatingManual(false);
   };
@@ -79,11 +84,12 @@ export const DimReduction: React.FC = () => {
   const runUMAP = async () => {
     if (!data) return;
     setIsReducing(true);
+    setErrorMessage(null);
     const res = await reduceDimension(data, targetD);
     if (res.success) {
       setReducedData(res.reduced_data);
     } else {
-      alert("Error: " + res.error);
+      setErrorMessage("UMAP Reduction Error: " + res.error);
     }
     setIsReducing(false);
   };
@@ -122,7 +128,7 @@ export const DimReduction: React.FC = () => {
               <p className="text-xs text-gray-400 mt-1">Loaded {data.length} rows and {data[0].length} dimensions.</p>
             </div>
             <button 
-              onClick={() => { setData(null); setReducedData(null); setCeilingResult(null); setManualResult(null); }}
+              onClick={() => { setData(null); setReducedData(null); setCeilingResult(null); setManualResult(null); setErrorMessage(null); }}
               className="text-xs text-gray-400 hover:text-white"
             >
               Clear
@@ -130,6 +136,12 @@ export const DimReduction: React.FC = () => {
           </div>
         )}
         <input type="file" ref={fileInputRef} accept=".csv" className="hidden" onChange={handleFileUpload} />
+        
+        {errorMessage && (
+          <div className="mt-4 bg-red-950 border border-red-800 text-red-400 text-sm p-4 rounded-xl">
+            {errorMessage}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

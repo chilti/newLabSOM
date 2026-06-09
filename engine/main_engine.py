@@ -208,9 +208,7 @@ def handle_estimate_dim(params):
         if mode == "ceiling":
             # Optimal Strategy: Local MLE fit_pw
             model = skdim.id.MLE()
-            model.fit_pw(X)
-            # local dimensions
-            local_dims = model.dimension_pw_
+            local_dims = model.fit_transform_pw(X)
             
             # calculate percentiles
             p50 = float(np.percentile(local_dims, 50))
