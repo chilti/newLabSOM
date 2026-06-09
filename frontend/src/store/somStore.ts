@@ -500,8 +500,8 @@ export const useSomStore = create<SOMState>((set, get) => ({
             hexGrid: result.hex_grid,
             mappedLabels: result.mapped_labels,
             errors: result.errors,
-            umap: get().result?.umap, // Preserve existing UMAP
-            umapSource: get().result?.umapSource
+            umap: get().result?.umap ?? null, // Preserve existing UMAP
+            umapSource: get().result?.umapSource ?? null
           },
           isTraining: false
         });
