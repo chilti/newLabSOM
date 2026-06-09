@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react';
 import chroma from 'chroma-js';
 import { line, curveCatmullRom } from 'd3-shape';
-import { useSomStore } from '../store/somStore';
+import { useSomStore, getApiUrl } from '../store/somStore';
 import { 
   Upload, 
   Database, 
@@ -166,8 +166,7 @@ export const ExploradorDatos: React.FC = () => {
   const handleRecluster = async () => {
     if (!result || !result.weights) return;
     try {
-      const isDesktop = window.location.protocol === 'file:' || window.location.protocol === 'about:' || !window.location.host;
-      const apiUrl = isDesktop ? 'http://localhost:5123/api/som/recluster' : '/api/som/recluster';
+      const apiUrl = getApiUrl('/api/som/recluster');
       
       const payload = {
         weights: result.weights,
@@ -187,7 +186,8 @@ export const ExploradorDatos: React.FC = () => {
       if (json.success && json.clustering) {
         reclusterLocally(json.clustering);
       } else {
-        alert(json.error || "Failed to re-cluster");
+        const errMsg = json.error || json.title || json.detail || JSON.stringify(json);
+        alert(typeof errMsg === 'string' ? errMsg : "Failed to re-cluster");
       }
     } catch (e: any) {
       alert("Network error: " + e.message);

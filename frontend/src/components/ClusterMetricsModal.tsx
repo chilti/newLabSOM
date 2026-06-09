@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Loader2, Activity } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { useSomStore } from '../store/somStore';
+import { useSomStore, getApiUrl } from '../store/somStore';
 
 interface Props {
   onClose: () => void;
@@ -36,8 +36,7 @@ export const ClusterMetricsModal: React.FC<Props> = ({ onClose }) => {
           max_k: 15
         };
 
-        const isDesktop = window.location.protocol === 'file:' || window.location.protocol === 'about:' || !window.location.host;
-        const apiUrl = isDesktop ? 'http://localhost:5123/api/som/evaluate_clusters' : '/api/som/evaluate_clusters';
+        const apiUrl = getApiUrl('/api/som/evaluate_clusters');
 
         const res = await fetch(apiUrl, {
           method: 'POST',

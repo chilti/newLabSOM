@@ -3,7 +3,7 @@ import { type NormalizationInfo, type NormalizationType, applyNormalizationToMat
 import { applyCmaSmoothing } from '../utils/timeSeries';
 
 // Helper to resolve API URLs dynamically based on deployment environment
-const getApiUrl = (path: string): string => {
+export const getApiUrl = (path: string): string => {
   // 1. Desktop context (Photino loads local index.html using file:// or app://)
   const isDesktop = window.location.protocol === 'file:' || window.location.protocol === 'about:' || !window.location.host;
   if (isDesktop) {
