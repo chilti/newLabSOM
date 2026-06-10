@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useSomStore } from '../store/somStore';
-import { Upload, Activity, Layers, Database, RefreshCw, Sliders, Play, Compass, FileText, Search, ExternalLink, Calculator } from 'lucide-react';
+import { Upload, Activity, Layers, Database, RefreshCw, Play, Compass, FileText, Search, ExternalLink } from 'lucide-react';
 
 export const SemanticBibliometrics: React.FC = () => {
   const {

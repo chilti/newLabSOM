@@ -71,6 +71,7 @@ interface SOMState {
   isTraining: boolean;
   isGeneratingUmap: boolean;
   isPreprocessing: boolean;
+  uploadProgress: number | null;
   activeTab: 'multidimensional' | 'temporal' | 'bibliometrics' | 'dimreduction' | 'semantic_bibliometrics';
   
   // Semantic Bibliometrics State
