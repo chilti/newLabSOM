@@ -9,5 +9,6 @@ onnxruntime>=1.15.0
 networkx>=2.8
 biopython>=1.80
 metaknowledge
+matplotlib
 --extra-index-url https://pypi.nvidia.com
 cuml-cu12

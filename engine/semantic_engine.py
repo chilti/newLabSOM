@@ -9,7 +9,6 @@ import metaknowledge as mk
 
 # For UMAP and skdim
 import umap
-import skdim
 
 # For clustering
 from sklearn.cluster import KMeans
@@ -279,6 +278,7 @@ def handle_embed(params):
         }
 
 def handle_reduce(params):
+    import skdim
     embeddings_list = params.get("embeddings", [])
     estimate_mode = params.get("estimate_mode", "ceiling")
     algorithm_name = params.get("algorithm_name", "MLE")
