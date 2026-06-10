@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Semantic SciMap</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body, html { 
+            height: 100%; width: 100%; 
+            overflow: hidden; 
+            background: #030712; /* Match tailwind bg-gray-950 */
+            color: #f3f4f6; 
+            font-family: 'Inter', 'Segoe UI', sans-serif; 
+        }
+        #canvas-container { width: 100vw; height: 100vh; position: relative; }
+        canvas { width: 100% !important; height: 100% !important; display: block; }
+        
+        #tooltip {
+            position: absolute; 
+            display: none; 
+            background: rgba(17, 24, 39, 0.95); /* Gray-900 transparent */
+            color: #f3f4f6;
+            padding: 12px; 
+            border-radius: 12px; 
+            font-size: 13px; 
+            pointer-events: none;
+            border: 1px solid rgba(255, 255, 255, 0.1); 
+            backdrop-filter: blur(8px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5); 
+            max-width: 340px; 
+            z-index: 100;
+        }
+        #tooltip .title { font-weight: 700; font-size: 14px; margin-bottom: 6px; color: #ffffff; }
+        #tooltip .author { color: #9ca3af; font-size: 12px; margin-bottom: 4px; }
+        #tooltip .meta-row { font-size: 11px; color: #60a5fa; margin-bottom: 2px; }
+        #tooltip .abstract { font-size: 11px; color: #9ca3af; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 6px; line-height: 1.4; }
+
+        #status {
+            position: absolute; top: 16px; left: 16px; 
+            background: rgba(17, 24, 39, 0.85);
+            padding: 8px 16px; border-radius: 99px; font-size: 12px; z-index: 50;
+            border: 1px solid rgba(255, 255, 255, 0.08); color: #f3f4f6; 
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(4px);
+        }
+        #legend {
+            position: absolute; bottom: 16px; right: 16px; 
+            background: rgba(17, 24, 39, 0.9);
+            padding: 14px; border-radius: 16px; font-size: 11px; z-index: 50;
+            border: 1px solid rgba(255, 255, 255, 0.08); 
+            max-height: 45vh; overflow-y: auto; color: #f3f4f6;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(4px);
+            width: 240px;
+        }
+        #legend .legend-header {
+            font-weight: 700; font-size: 12px; margin-bottom: 8px; color: #ffffff;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 4px;
+        }
+        #legend .item { display: flex; align-items: center; gap: 8px; margin: 5px 0; }
+        #legend .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+        #legend .text-label { truncate: true; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        
+        /* Cluster labels (styled beautifully) */
+        .cluster-label {
+            position: absolute;
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 12px;
+            background: rgba(17, 24, 39, 0.82);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 99px;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+            white-space: nowrap;
+            pointer-events: none;
+            font-family: 'Inter', 'Segoe UI', sans-serif;
+            font-weight: 600;
+            color: #f3f4f6;
+            transform: translate(-50%, -50%);
+            transition: opacity 0.25s ease;
+            user-select: none;
+        }
+        .cluster-label.tier-1 { font-size: 13px; font-weight: 700; border-color: rgba(99, 102, 241, 0.3); }
+        .cluster-label.tier-2 { font-size: 11px; font-weight: 600; color: #cbd5e1; }
+        .cluster-label.tier-3 { font-size: 9px; font-weight: 500; color: #94a3b8; }
+
+        #controls {
+            position: absolute; top: 16px; right: 16px; 
+            background: rgba(17, 24, 39, 0.85);
+            padding: 8px 16px; border-radius: 99px; font-size: 11px; z-index: 50;
+            border: 1px solid rgba(255, 255, 255, 0.08); color: #9ca3af; 
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(4px);
+        }
+        
+        #loader {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #030712; z-index: 200;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+        .spinner {
+            border: 4px solid rgba(99, 102, 241, 0.1);
+            width: 50px; height: 50px;
+            border-radius: 50%;
+            border-left-color: #6366f1;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        #no-data-notice {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            text-align: center; color: #6b7280; font-size: 15px; z-index: 40;
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="loader" style="display: none;">
+        <div class="spinner"></div>
+        <div style="font-size: 15px; color: #9ca3af; font-weight: 500;">Cargando mapa interactivo...</div>
+    </div>
+
+    <div id="no-data-notice">
+        <div style="font-size: 24px; margin-bottom: 8px;">🌌</div>
+        <div>Esperando que se procesen y carguen los datos semánticos...</div>
+    </div>
+
+    <div id="canvas-container" style="display: none;">
+        <canvas id="canvas"></canvas>
+        <canvas id="overlay-canvas" style="position: absolute; top: 0; left: 0; pointer-events: none; width: 100% !important; height: 100% !important; display: block;"></canvas>
+    </div>
+    
+    <div id="tooltip">
+        <div class="title"></div>
+        <div class="author"></div>
+        <div class="meta-row"></div>
+        <div class="abstract"></div>
+    </div>
+    
+    <div id="status">⏳ Listo</div>
+    <div id="controls">🖱️ Rueda: Zoom · Click-Arrastrar: Mover · Click-Derecho: Abrir Documento</div>
+    <div id="legend" style="display: none;"></div>
+
+    <script type="module">
+        import createScatterplot from 'https://esm.sh/regl-scatterplot@1.16.0';
+
+        const canvas = document.getElementById('canvas');
+        const overlayCanvas = document.getElementById('overlay-canvas');
+        const overlayCtx = overlayCanvas.getContext('2d');
+        const tooltip = document.getElementById('tooltip');
+        const status = document.getElementById('status');
+        const legendEl = document.getElementById('legend');
+        const container = document.getElementById('canvas-container');
+        const loader = document.getElementById('loader');
+        const noDataNotice = document.getElementById('no-data-notice');
+
+        let scatterplot = null;
+        let mapData = null; // { records, coords_2d, cluster_assignment, clusters }
+        let sortedToOrigIdx = null;
+        let activeHoverIdx = -1;
+        let currentHoveredIdx = -1;
+        let currentCamera = null;
+
+        // Vibrantes colores tailwind/pastel para clusters
+        const palette = [
+            [0.388, 0.447, 0.961, 0.85],  // Indigo-500
+            [0.937, 0.267, 0.455, 0.85],  // Pink-500
+            [0.063, 0.804, 0.584, 0.85],  // Emerald-400
+            [0.976, 0.529, 0.047, 0.85],  // Orange-500
+            [0.639, 0.286, 0.941, 0.85],  // Purple-500
+            [0.024, 0.702, 0.894, 0.85],  // Sky-400
+            [0.957, 0.808, 0.078, 0.85],  // Yellow-400
+            [0.898, 0.224, 0.208, 0.85],  // Red-500
+            [0.486, 0.796, 0.141, 0.85],  // Lime-500
+            [0.078, 0.639, 0.722, 0.85],  // Cyan-500
+            [0.906, 0.459, 0.165, 0.85],  // Amber-500
+            [0.557, 0.616, 0.702, 0.85],  // Slate-400
+        ];
+        
+        // Background color / Noise color at the end
+        palette.push([0.220, 0.271, 0.349, 0.4]); // Grey / Ruido
+        const bgIdx = palette.length - 1;
+
+        // Create HTML labels overlay
+        const labelsContainer = document.createElement('div');
+        labelsContainer.id = 'labels-container';
+        labelsContainer.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:hidden;z-index:10;';
+        container.appendChild(labelsContainer);
+
+        // Normalize coordinates and package for regl-scatterplot
+        function processPoints(coords_2d, cluster_assignment) {
+            const drawTotal = coords_2d.length;
+
+            let xMin = Infinity, xMax = -Infinity;
+            let yMin = Infinity, yMax = -Infinity;
+
+            for (let i = 0; i < drawTotal; i++) {
+                const pt = coords_2d[i];
+                if (pt.x < xMin) xMin = pt.x;
+                if (pt.x > xMax) xMax = pt.x;
+                if (pt.y < yMin) yMin = pt.y;
+                if (pt.y > yMax) yMax = pt.y;
+            }
+
+            const xRange = xMax - xMin || 1;
+            const yRange = yMax - yMin || 1;
+            const scale = Math.max(xRange, yRange);
+
+            // Create mappings for categories
+            const categoryMap = {};
+            const uniqueLabels = Array.from(new Set(cluster_assignment));
+            
+            // Filter noise
+            const categories = uniqueLabels.filter(lbl => lbl && lbl !== 'Ruido' && lbl !== -1 && lbl !== '-1').sort();
+            categories.forEach((name, idx) => {
+                categoryMap[name] = idx;
+            });
+
+            const tempCat = new Int32Array(drawTotal);
+            for (let i = 0; i < drawTotal; i++) {
+                const lbl = cluster_assignment[i];
+                if (lbl && lbl !== 'Ruido' && lbl !== -1 && lbl !== '-1') {
+                    tempCat[i] = categoryMap[lbl] % (palette.length - 1);
+                } else {
+                    tempCat[i] = bgIdx;
+                }
+            }
+
+            // Draw noise on bottom, colored clusters on top
+            const indices = new Int32Array(drawTotal);
+            for (let i = 0; i < drawTotal; i++) indices[i] = i;
+            indices.sort((a, b) => {
+                const aIsBg = tempCat[a] === bgIdx;
+                const bIsBg = tempCat[b] === bgIdx;
+                if (aIsBg && !bIsBg) return -1;
+                if (!aIsBg && bIsBg) return 1;
+                return 0;
+            });
+
+            const outX = new Float32Array(drawTotal);
+            const outY = new Float32Array(drawTotal);
+            const outValueA = new Float32Array(drawTotal);
+            sortedToOrigIdx = new Int32Array(drawTotal);
+
+            for (let i = 0; i < drawTotal; i++) {
+                const origIdx = indices[i];
+                sortedToOrigIdx[i] = origIdx;
+                
+                const pt = coords_2d[origIdx];
+                outX[i] = ((pt.x - xMin) / scale) * 2 - 1;
+                outY[i] = ((pt.y - yMin) / scale) * 2 - 1;
+                outValueA[i] = tempCat[origIdx];
+            }
+
+            return {
+                drawData: { x: outX, y: outY, valueA: outValueA },
+                categories,
+                categoryMap,
+                bounds: { xMin, yMin, scale }
+            };
+        }
+
+        function projectWithCamera(ux, uy, camera, width, height) {
+            const m = camera.view;
+            let clipX = m[0] * ux + m[4] * uy + m[12];
+            const clipY = m[1] * ux + m[5] * uy + m[13];
+            clipX = clipX * (height / width);
+            const screenX = ((clipX + 1) / 2) * width;
+            const screenY = ((1 - clipY) / 2) * height;
+            return [screenX, screenY];
+        }
+
+        function updateLabels() {
+            if (!mapData || !mapData.clusters || mapData.clusters.length === 0 || !scatterplot) return;
+
+            const camera = currentCamera || scatterplot.get('camera');
+            if (!camera || !camera.view) return;
+
+            const rect = container.getBoundingClientRect();
+            const width = rect.width;
+            const height = rect.height;
+            const zoomScale = Math.abs(camera.view[0]);
+
+            // Set size ranges dynamically based on data size
+            const sortedSizes = mapData.clusters.map(c => c.size).sort((a, b) => b - a);
+            const TIER1_MIN = sortedSizes[Math.min(15, sortedSizes.length - 1)] || 50;
+            const TIER2_MIN = sortedSizes[Math.min(45, sortedSizes.length - 1)] || 15;
+            const TIER3_MIN = sortedSizes[Math.min(100, sortedSizes.length - 1)] || 5;
+
+            const TIER2_ZOOM = 1.3;
+            const TIER3_ZOOM = 3.5;
+            const SUBLABEL_ZOOM = 2.2;
+
+            labelsContainer.innerHTML = '';
+
+            const activeClusters = mapData.clusters.filter(c => {
+                if (c.label === 'Ruido') return false;
+                if (c.size >= TIER1_MIN) return true;
+                if (c.size >= TIER2_MIN && zoomScale >= TIER2_ZOOM) return true;
+                if (c.size >= TIER3_MIN && zoomScale >= TIER3_ZOOM) return true;
+                return false;
+            }).sort((a, b) => b.size - a.size);
+
+            const placedRects = [];
+            const { xMin, yMin, scale } = mapData.bounds;
+
+            function drawLabel(label, sx, sy, tier, fontSize, opacity) {
+                const estWidth = label.length * fontSize * 0.58 + 20;
+                const estHeight = fontSize * 1.6 + 6;
+                const lr = { 
+                    left: sx - estWidth / 2, 
+                    right: sx + estWidth / 2, 
+                    top: sy - estHeight / 2, 
+                    bottom: sy + estHeight / 2 
+                };
+
+                for (const r of placedRects) {
+                    if (!(lr.left > r.right + 8 || lr.right < r.left - 8 || lr.top > r.bottom + 8 || lr.bottom < r.top - 8)) {
+                        return false;
+                    }
+                }
+                placedRects.push(lr);
+
+                const div = document.createElement('div');
+                div.className = `cluster-label ${tier}`;
+                div.innerText = label;
+                div.style.left = `${sx}px`;
+                div.style.top = `${sy}px`;
+                div.style.fontSize = `${fontSize}px`;
+                div.style.opacity = opacity;
+                labelsContainer.appendChild(div);
+                return true;
+            }
+
+            activeClusters.forEach(c => {
+                const normX = ((c.x - xMin) / scale) * 2 - 1;
+                const normY = ((c.y - yMin) / scale) * 2 - 1;
+                const [sx, sy] = projectWithCamera(normX, normY, camera, width, height);
+
+                const margin = 30;
+                if (sx < margin || sx > width - margin || sy < margin || sy > height - margin) return;
+
+                let tier = 'tier-3', fontSize = 9;
+                if (c.size >= TIER1_MIN) {
+                    tier = 'tier-1';
+                    fontSize = 12;
+                } else if (c.size >= TIER2_MIN) {
+                    tier = 'tier-2';
+                    fontSize = 10;
+                }
+
+                const opacity = tier === 'tier-1' ? 0.95 : (tier === 'tier-2' ? 0.88 : 0.78);
+                drawLabel(c.label, sx, sy, tier, fontSize, opacity);
+
+                // Nested sublabels
+                if (zoomScale >= SUBLABEL_ZOOM && c.sublabels && c.sublabels.length > 0) {
+                    c.sublabels.forEach(sub => {
+                        const snormX = ((sub.x - xMin) / scale) * 2 - 1;
+                        const snormY = ((sub.y - yMin) / scale) * 2 - 1;
+                        const [ssx, ssy] = projectWithCamera(snormX, snormY, camera, width, height);
+
+                        if (ssx < margin || ssx > width - margin || ssy < margin || ssy > height - margin) return;
+
+                        const zoomFade = Math.min(1.0, (zoomScale - SUBLABEL_ZOOM) / 1.5);
+                        const subOpacity = 0.75 * zoomFade;
+                        if (subOpacity < 0.1) return;
+
+                        drawLabel(sub.label, ssx, ssy, 'tier-2', 10, subOpacity);
+                    });
+                }
+            });
+        }
+
+        function buildLegend(categories, categoryMap) {
+            if (categories.length === 0) {
+                legendEl.style.display = 'none';
+                return;
+            }
+            
+            legendEl.innerHTML = '<div class="legend-header">Temas Identificados</div>';
+            categories.slice(0, 12).forEach((name) => {
+                const idx = categoryMap[name];
+                const c = palette[idx % (palette.length - 1)];
+                const rgb = `rgb(${Math.round(c[0]*255)}, ${Math.round(c[1]*255)}, ${Math.round(c[2]*255)})`;
+                
+                const item = document.createElement('div');
+                item.className = 'item';
+                item.innerHTML = `<div class="dot" style="background: ${rgb};"></div><div class="text-label" title="${name}">${name}</div>`;
+                legendEl.appendChild(item);
+            });
+            legendEl.style.display = 'block';
+        }
+
+        async function loadMapData(payload) {
+            loader.style.display = 'flex';
+            noDataNotice.style.display = 'none';
+            container.style.display = 'none';
+
+            try {
+                const total = payload.coords_2d.length;
+                status.textContent = `Procesando ${total.toLocaleString()} puntos...`;
+
+                const processed = processPoints(payload.coords_2d, payload.cluster_assignment);
+                
+                mapData = {
+                    records: payload.records,
+                    coords_2d: payload.coords_2d,
+                    cluster_assignment: payload.cluster_assignment,
+                    clusters: payload.clusters || [],
+                    bounds: processed.bounds
+                };
+
+                // Setup or adjust canvas size
+                const rect = container.getBoundingClientRect();
+                const w = Math.max(100, rect.width || window.innerWidth || 800);
+                const h = Math.max(100, rect.height || window.innerHeight || 600);
+                const dpr = window.devicePixelRatio || 1;
+                canvas.width = w * dpr;
+                canvas.height = h * dpr;
+                overlayCanvas.width = w * dpr;
+                overlayCanvas.height = h * dpr;
+
+                container.style.display = 'block';
+
+                if (!scatterplot) {
+                    scatterplot = createScatterplot({
+                        canvas,
+                        width: w,
+                        height: h,
+                        pointSize: 5,
+                        opacity: 0.65,
+                        colorBy: 'valueA',
+                        pointColor: palette,
+                        backgroundColor: [3/255, 7/255, 18/255, 1], // Match #030712
+                        lassoColor: [99/255, 102/255, 241/255, 1],
+                        showReticle: false
+                    });
+
+                    scatterplot.subscribe('view', (eventData) => {
+                        currentCamera = eventData.camera;
+                        updateLabels();
+                    });
+
+                    scatterplot.subscribe('pointover', (sortedIdx) => {
+                        if (sortedIdx >= 0 && sortedIdx < total) {
+                            currentHoveredIdx = sortedIdx;
+                            const idx = sortedToOrigIdx ? sortedToOrigIdx[sortedIdx] : sortedIdx;
+                            activeHoverIdx = idx;
+
+                            const record = mapData.records[idx];
+                            const label = mapData.cluster_assignment[idx];
+
+                            tooltip.querySelector('.title').textContent = record.title || '(Sin Título)';
+                            tooltip.querySelector('.author').textContent = record.extras?.AU || 'Autores no especificados';
+                            
+                            let metaStr = '';
+                            if (record.extras?.SO) metaStr += record.extras.SO;
+                            if (record.extras?.PY) metaStr += ` (${record.extras.PY})`;
+                            if (label && label !== 'Ruido') metaStr += ` • Clúster: ${label}`;
+                            tooltip.querySelector('.meta-row').textContent = metaStr;
+
+                            const abstract = record.abstract || '(Sin resumen disponible)';
+                            tooltip.querySelector('.abstract').textContent = abstract.length > 220 
+                                ? abstract.substring(0, 220) + '...' 
+                                : abstract;
+
+                            tooltip.style.display = 'block';
+                        }
+                    });
+
+                    scatterplot.subscribe('pointout', () => {
+                        currentHoveredIdx = -1;
+                        activeHoverIdx = -1;
+                        tooltip.style.display = 'none';
+                    });
+                } else {
+                    scatterplot.set({ width: w, height: h });
+                }
+
+                await scatterplot.draw(processed.drawData);
+                buildLegend(processed.categories, processed.categoryMap);
+                updateLabels();
+
+                status.textContent = `Listos ${total.toLocaleString()} documentos · Rueda para zoom`;
+            } catch(e) {
+                console.error("Error drawing WebGL Map:", e);
+                status.textContent = `❌ Error: ${e.message}`;
+            } finally {
+                loader.style.display = 'none';
+            }
+        }
+
+        // Mouse hover positioning
+        window.addEventListener('mousemove', (e) => {
+            if (tooltip.style.display === 'block') {
+                const wWidth = window.innerWidth;
+                const wHeight = window.innerHeight;
+                
+                let posX = e.clientX + 15;
+                let posY = e.clientY + 15;
+                
+                // Keep tooltip inside screen boundaries
+                if (posX + 340 > wWidth) {
+                    posX = e.clientX - 355;
+                }
+                if (posY + 250 > wHeight) {
+                    posY = e.clientY - 265;
+                }
+                tooltip.style.left = `${posX}px`;
+                tooltip.style.top = `${posY}px`;
+            }
+        });
+
+        // Click-Right handler to resolve DOI/PMID
+        canvas.addEventListener('contextmenu', (e) => {
+            if (currentHoveredIdx >= 0 && mapData) {
+                e.preventDefault();
+                const idx = sortedToOrigIdx ? sortedToOrigIdx[currentHoveredIdx] : currentHoveredIdx;
+                const record = mapData.records[idx];
+                const doi = record.doi || record.id;
+                
+                if (doi) {
+                    if (doi.startsWith('10.')) {
+                        window.open('https://doi.org/' + doi, '_blank');
+                    } else if (doi.startsWith('PMID_')) {
+                        window.open('https://pubmed.ncbi.nlm.nih.gov/' + doi.replace('PMID_', ''), '_blank');
+                    } else if (doi.startsWith('http')) {
+                        window.open(doi, '_blank');
+                    } else {
+                        // Fallback Search DOI or Google Scholar
+                        window.open('https://scholar.google.com/scholar?q=' + encodeURIComponent(record.title), '_blank');
+                    }
+                }
+            }
+        });
+
+        // Listen for data load requests from the React parent app
+        window.addEventListener('message', (event) => {
+            if (event.data) {
+                if (event.data.type === 'LOAD_DATA') {
+                    loadMapData(event.data.data);
+                } else if (event.data.type === 'HIGHLIGHT_DOIS') {
+                    // Option to highlight specific points if needed
+                    console.log("Map highlight DOIs received", event.data.dois);
+                }
+            }
+        });
+
+        // Resize handler
+        window.addEventListener('resize', () => {
+            if (!scatterplot || !mapData) return;
+            const rect = container.getBoundingClientRect();
+            const w = Math.max(100, rect.width || window.innerWidth || 800);
+            const h = Math.max(100, rect.height || window.innerHeight || 600);
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = w * dpr;
+            canvas.height = h * dpr;
+            overlayCanvas.width = w * dpr;
+            overlayCanvas.height = h * dpr;
+            scatterplot.set({ width: w, height: h });
+            updateLabels();
+        });
+
+        // Notify parent we are ready
+        window.parent.postMessage({ type: 'MAP_READY' }, '*');
+    </script>
+</body>
+</html>

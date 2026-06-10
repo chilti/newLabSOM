@@ -54,6 +54,16 @@ export interface HardwareInfo {
   details: string;
 }
 
+export interface SemanticRecord {
+  id: string;
+  doi: string;
+  title: string;
+  abstract: string;
+  keywords: string[];
+  concatenated_text: string;
+  extras: Record<string, string>;
+}
+
 interface SOMState {
   // Config & Status
   config: SOMConfig;
@@ -61,8 +71,27 @@ interface SOMState {
   isTraining: boolean;
   isGeneratingUmap: boolean;
   isPreprocessing: boolean;
-  uploadProgress: number | null;
-  activeTab: 'multidimensional' | 'temporal' | 'bibliometrics' | 'dimreduction';
+  activeTab: 'multidimensional' | 'temporal' | 'bibliometrics' | 'dimreduction' | 'semantic_bibliometrics';
+  
+  // Semantic Bibliometrics State
+  semanticRecords: SemanticRecord[] | null;
+  semanticEmbeddings: number[][] | null;
+  semanticIntrinsicData: number[][] | null;
+  semantic2DCoords: Array<{ x: number; y: number }> | null;
+  semanticClusters: any[] | null;
+  semanticClusterAssignment: string[] | null;
+  isSemanticPreprocessing: boolean;
+  isSemanticEmbedding: boolean;
+  isSemanticReducing: boolean;
+  isSemanticClustering: boolean;
+  semanticTargetD: number;
+  semanticNumLevels: number;
+  semanticMinSize: number;
+  semanticCeilingResult: any;
+  semanticManualAlgo: string;
+  semanticManualResult: any;
+  semanticFileName: string;
+  semanticEmbedModel: 'nomic' | 'specter';
   
   // Data
   dataMatrix: number[][];
@@ -151,7 +180,7 @@ interface SOMState {
   
   // Setters & Actions
   setConfig: (config: Partial<SOMConfig>) => void;
-  setActiveTab: (tab: 'multidimensional' | 'temporal' | 'bibliometrics' | 'dimreduction') => void;
+  setActiveTab: (tab: 'multidimensional' | 'temporal' | 'bibliometrics' | 'dimreduction' | 'semantic_bibliometrics') => void;
   fetchSystemStatus: () => Promise<void>;
   loadCsvData: (csvText: string, labelColIndex?: number, ignoreCols?: number[], origin?: 'csv' | 'monothematic' | 'bipartite', fileName?: string) => void;
   applyNormalization: (type: NormalizationType) => void;
@@ -166,6 +195,19 @@ interface SOMState {
   importProject: (fileContent: string) => void;
   estimateDimension: (data: number[][], mode: 'ceiling' | 'manual', algorithmName?: string) => Promise<any>;
   reduceDimension: (data: number[][], targetD: number) => Promise<any>;
+  
+  // Semantic actions
+  preprocessSemantic: (file: File, useMesh: boolean, extraFields: string[], extractTitle: boolean, extractAbstract: boolean, extractKeywords: boolean) => Promise<void>;
+  generateSemanticEmbeddings: () => Promise<void>;
+  estimateSemanticIntrinsicDim: () => Promise<void>;
+  reduceSemanticDimension: () => Promise<void>;
+  clusterSemantic: () => Promise<void>;
+  setSemanticTargetD: (d: number) => void;
+  setSemanticNumLevels: (l: number) => void;
+  setSemanticMinSize: (s: number) => void;
+  setSemanticManualAlgo: (algo: string) => void;
+  setSemanticEmbedModel: (model: 'nomic' | 'specter') => void;
+  clearSemanticState: () => void;
 }
 
 const parseCSVLine = (line: string): string[] => {
@@ -240,6 +282,26 @@ export const useSomStore = create<SOMState>((set, get) => ({
   isPreprocessing: false,
   uploadProgress: null,
   activeTab: 'bibliometrics',
+  
+  // Semantic Bibliometrics Initial State
+  semanticRecords: null,
+  semanticEmbeddings: null,
+  semanticIntrinsicData: null,
+  semantic2DCoords: null,
+  semanticClusters: null,
+  semanticClusterAssignment: null,
+  isSemanticPreprocessing: false,
+  isSemanticEmbedding: false,
+  isSemanticReducing: false,
+  isSemanticClustering: false,
+  semanticTargetD: 15,
+  semanticNumLevels: 2,
+  semanticMinSize: 10,
+  semanticCeilingResult: null,
+  semanticManualAlgo: 'TwoNN',
+  semanticManualResult: null,
+  semanticFileName: '',
+  semanticEmbedModel: 'nomic',
   
   dataMatrix: [],
   originalDataMatrix: null,
@@ -769,5 +831,213 @@ export const useSomStore = create<SOMState>((set, get) => ({
     } catch (error: any) {
       return { success: false, error: error.message };
     }
-  }
+  },
+
+  preprocessSemantic: async (file: File, useMesh: boolean, extraFields: string[], extractTitle: boolean, extractAbstract: boolean, extractKeywords: boolean) => {
+    set({ isSemanticPreprocessing: true });
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('useMesh', useMesh.toString());
+      formData.append('extractTitle', extractTitle.toString());
+      formData.append('extractAbstract', extractAbstract.toString());
+      formData.append('extractKeywords', extractKeywords.toString());
+      formData.append('extraFields', extraFields.join(','));
+
+      const res = await fetch(getApiUrl('/api/semantic/preprocess'), {
+        method: 'POST',
+        body: formData
+      });
+      const json = await res.json();
+      if (json.success) {
+        set({
+          semanticRecords: json.records,
+          semanticFileName: file.name,
+          // Reset downstream states
+          semanticEmbeddings: null,
+          semanticIntrinsicData: null,
+          semantic2DCoords: null,
+          semanticClusters: null,
+          semanticClusterAssignment: null,
+          semanticCeilingResult: null,
+          semanticManualResult: null
+        });
+      } else {
+        alert("Preprocess error: " + json.error);
+      }
+    } catch (e: any) {
+      alert("Connection failed: " + e.message);
+    } finally {
+      set({ isSemanticPreprocessing: false });
+    }
+  },
+
+  generateSemanticEmbeddings: async () => {
+    const { semanticRecords, semanticEmbedModel } = get();
+    if (!semanticRecords || semanticRecords.length === 0) return;
+
+    set({ isSemanticEmbedding: true });
+    try {
+      const res = await fetch(getApiUrl('/api/semantic/embed'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ records: semanticRecords, model: semanticEmbedModel })
+      });
+      const json = await res.json();
+      if (json.success) {
+        set({
+          semanticEmbeddings: json.embeddings,
+          // Reset downstream states
+          semanticIntrinsicData: null,
+          semantic2DCoords: null,
+          semanticClusters: null,
+          semanticClusterAssignment: null
+        });
+      } else {
+        alert("Embedding error: " + json.error);
+      }
+    } catch (e: any) {
+      alert("Connection failed: " + e.message);
+    } finally {
+      set({ isSemanticEmbedding: false });
+    }
+  },
+
+  estimateSemanticIntrinsicDim: async () => {
+    const { semanticEmbeddings } = get();
+    if (!semanticEmbeddings || semanticEmbeddings.length === 0) return;
+
+    set({ isSemanticReducing: true });
+    try {
+      // Call reduce endpoint in estimate-only mode (no target_dim override)
+      const res = await fetch(getApiUrl('/api/semantic/reduce'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          embeddings: semanticEmbeddings,
+          estimate_mode: 'ceiling',
+          algorithm_name: 'MLE',
+          target_dim: 0  // 0 means: use the estimated dimension
+        })
+      });
+      const json = await res.json();
+      if (json.success) {
+        set({
+          semanticIntrinsicData: json.intrinsic_data,
+          semantic2DCoords: json.coords_2d,
+          semanticCeilingResult: {
+            success: true,
+            estimated_dimension: json.estimated_dimension,
+            metrics: json.metrics
+          },
+          semanticTargetD: json.target_dim,
+          // Reset downstream clustering
+          semanticClusters: null,
+          semanticClusterAssignment: null
+        });
+      } else {
+        alert("Estimation error: " + json.error);
+      }
+    } catch (e: any) {
+      alert("Connection failed: " + e.message);
+    } finally {
+      set({ isSemanticReducing: false });
+    }
+  },
+
+  reduceSemanticDimension: async () => {
+    const { semanticEmbeddings, semanticTargetD } = get();
+    if (!semanticEmbeddings || semanticEmbeddings.length === 0) return;
+
+    set({ isSemanticReducing: true });
+    try {
+      // Use manual target_dim (user may have adjusted after ceiling estimate)
+      const res = await fetch(getApiUrl('/api/semantic/reduce'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          embeddings: semanticEmbeddings,
+          estimate_mode: 'manual_k',  // skip re-estimation, use target_dim directly
+          algorithm_name: 'MLE',
+          target_dim: semanticTargetD
+        })
+      });
+      const json = await res.json();
+      if (json.success) {
+        set({
+          semanticIntrinsicData: json.intrinsic_data,
+          semantic2DCoords: json.coords_2d,
+          // Reset downstream clustering
+          semanticClusters: null,
+          semanticClusterAssignment: null
+        });
+      } else {
+        alert("Reduction error: " + json.error);
+      }
+    } catch (e: any) {
+      alert("Connection failed: " + e.message);
+    } finally {
+      set({ isSemanticReducing: false });
+    }
+  },
+
+  clusterSemantic: async () => {
+    const { semanticIntrinsicData, semantic2DCoords, semanticRecords, semanticNumLevels, semanticMinSize } = get();
+    if (!semanticIntrinsicData || !semantic2DCoords || !semanticRecords) return;
+
+    set({ isSemanticClustering: true });
+    try {
+      const res = await fetch(getApiUrl('/api/semantic/cluster'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          intrinsic_data: semanticIntrinsicData,
+          coords_2d: semantic2DCoords,
+          records: semanticRecords,
+          num_levels: semanticNumLevels,
+          min_size: semanticMinSize
+        })
+      });
+      const json = await res.json();
+      if (json.success) {
+        set({
+          semanticClusters: json.clusters,
+          semanticClusterAssignment: json.cluster_assignment
+        });
+      } else {
+        alert("Clustering error: " + json.error);
+      }
+    } catch (e: any) {
+      alert("Connection failed: " + e.message);
+    } finally {
+      set({ isSemanticClustering: false });
+    }
+  },
+
+  setSemanticTargetD: (d: number) => set({ semanticTargetD: d }),
+  setSemanticNumLevels: (l: number) => set({ semanticNumLevels: l }),
+  setSemanticMinSize: (s: number) => set({ semanticMinSize: s }),
+  setSemanticManualAlgo: (algo: string) => set({ semanticManualAlgo: algo }),
+  setSemanticEmbedModel: (model: 'nomic' | 'specter') => set({ semanticEmbedModel: model }),
+  
+  clearSemanticState: () => set({
+    semanticRecords: null,
+    semanticEmbeddings: null,
+    semanticIntrinsicData: null,
+    semantic2DCoords: null,
+    semanticClusters: null,
+    semanticClusterAssignment: null,
+    isSemanticPreprocessing: false,
+    isSemanticEmbedding: false,
+    isSemanticReducing: false,
+    isSemanticClustering: false,
+    semanticTargetD: 15,
+    semanticNumLevels: 2,
+    semanticMinSize: 10,
+    semanticCeilingResult: null,
+    semanticManualAlgo: 'TwoNN',
+    semanticManualResult: null,
+    semanticFileName: '',
+    semanticEmbedModel: 'nomic'
+  })
 }));

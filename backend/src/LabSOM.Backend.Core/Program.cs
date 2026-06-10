@@ -11,6 +11,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton<HardwareDetectorService>();
 builder.Services.AddSingleton<PreprocessService>();
 builder.Services.AddSingleton<SOMEngineService>();
+builder.Services.AddSingleton<SemanticService>();
 
 // Allow large matrices (e.g. for SOM Weights)
 builder.Services.Configure<Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions>(options =>
@@ -154,6 +155,90 @@ app.MapPost("/api/dim/reduce", async (ReduceDimensionRequest request, SOMEngineS
     }
     
     var result = await engine.ReduceDimensionAsync(request);
+    if (!result.Success)
+    {
+        return Results.Json(result, statusCode: 500);
+    }
+    return Results.Ok(result);
+});
+
+// 8. Semantic Bibliometrics Endpoints
+app.MapPost("/api/semantic/preprocess", async (HttpRequest req, SemanticService service) =>
+{
+    if (!req.HasFormContentType || req.Form.Files.Count == 0)
+    {
+        return Results.BadRequest(new { success = false, error = "No file uploaded." });
+    }
+
+    var file = req.Form.Files[0];
+    
+    // Parse fields
+    var extraFieldsRaw = req.Form["extraFields"].ToString() ?? "";
+    var extraFields = new List<string>();
+    if (!string.IsNullOrWhiteSpace(extraFieldsRaw))
+    {
+        foreach (var field in extraFieldsRaw.Split(','))
+        {
+            var trimmed = field.Trim();
+            if (!string.IsNullOrEmpty(trimmed)) extraFields.Add(trimmed);
+        }
+    }
+
+    var request = new SemanticParseRequest
+    {
+        UseMesh = bool.TryParse(req.Form["useMesh"], out bool um) ? um : true,
+        ExtractTitle = !bool.TryParse(req.Form["extractTitle"], out bool et) || et,
+        ExtractAbstract = !bool.TryParse(req.Form["extractAbstract"], out bool ea) || ea,
+        ExtractKeywords = !bool.TryParse(req.Form["extractKeywords"], out bool ek) || ek,
+        ExtraFields = extraFields
+    };
+
+    var result = await service.PreprocessSemanticAsync(file, request);
+    if (!result.Success)
+    {
+        return Results.Json(result, statusCode: 500);
+    }
+    return Results.Ok(result);
+});
+
+app.MapPost("/api/semantic/embed", async (SemanticEmbedRequest request, SemanticService service) =>
+{
+    if (request.Records == null || request.Records.Count == 0)
+    {
+        return Results.BadRequest(new { success = false, error = "Records list is empty." });
+    }
+
+    var result = await service.GenerateEmbeddingsAsync(request);
+    if (!result.Success)
+    {
+        return Results.Json(result, statusCode: 500);
+    }
+    return Results.Ok(result);
+});
+
+app.MapPost("/api/semantic/reduce", async (SemanticReduceRequest request, SemanticService service) =>
+{
+    if (request.Embeddings == null || request.Embeddings.Count == 0)
+    {
+        return Results.BadRequest(new { success = false, error = "Embeddings list is empty." });
+    }
+
+    var result = await service.ReduceDimensionAsync(request);
+    if (!result.Success)
+    {
+        return Results.Json(result, statusCode: 500);
+    }
+    return Results.Ok(result);
+});
+
+app.MapPost("/api/semantic/cluster", async (SemanticClusterRequest request, SemanticService service) =>
+{
+    if (request.IntrinsicData == null || request.IntrinsicData.Count == 0)
+    {
+        return Results.BadRequest(new { success = false, error = "Intrinsic data list is empty." });
+    }
+
+    var result = await service.ClusterSemanticAsync(request);
     if (!result.Success)
     {
         return Results.Json(result, statusCode: 500);
