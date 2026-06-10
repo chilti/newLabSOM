@@ -39,6 +39,21 @@ spanish_stop_words = [
 from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
 ALL_STOPWORDS = list(ENGLISH_STOP_WORDS) + spanish_stop_words
 
+def load_environment():
+    # 1. Try to load from local newLabSOM root (.env is in parent directory relative to engine/)
+    local_env = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env"))
+    if os.path.exists(local_env):
+        load_dotenv(local_env)
+        return
+    # 2. Try current working directory
+    if os.path.exists(".env"):
+        load_dotenv(".env")
+        return
+    # 3. Fallback to user's Proyectos/RAGs/.env path
+    fallback_env = r"c:\Users\jlja\Documents\Proyectos\RAGs\.env"
+    if os.path.exists(fallback_env):
+        load_dotenv(fallback_env)
+
 def clean_text(text):
     if not text:
         return ""
@@ -196,8 +211,8 @@ def handle_embed(params):
         
     texts = [r.get("concatenated_text", "") for r in records]
     
-    # Load dotenv from RAGs folder if present
-    load_dotenv(r"c:\Users\jlja\Documents\Proyectos\RAGs\.env")
+    # Load environment variables
+    load_environment()
     
     embeddings = []
     
@@ -419,8 +434,8 @@ def handle_cluster(params):
         return {"success": False, "error": "No intrinsic dimension data provided for clustering."}
         
     try:
-        # Load dotenv from RAGs
-        load_dotenv(r"c:\Users\jlja\Documents\Proyectos\RAGs\.env")
+        # Load environment variables
+        load_environment()
         
         # Initialize local LLM client if available
         client = None
