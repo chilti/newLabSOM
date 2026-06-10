@@ -179,7 +179,7 @@ export const DimReduction: React.FC = () => {
         </div>
 
         {/* 3. Manual Estimator */}
-        <div className={`bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-xl ${!data ? 'opacity-50 pointer-events-none' : ''}`}>
+        <div className={`bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-xl ${!dimData ? 'opacity-50 pointer-events-none' : ''}`}>
           <h3 className="text-md font-bold text-gray-200 flex items-center space-x-2 mb-2">
             <Calculator className="w-5 h-5 text-indigo-400" />
             <span>Manual Estimation</span>
