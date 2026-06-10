@@ -194,10 +194,6 @@ app.MapPost("/api/semantic/preprocess", async (HttpRequest req, SemanticService 
     };
 
     var result = await service.PreprocessSemanticAsync(file, request);
-    if (!result.Success)
-    {
-        return Results.Json(result, statusCode: 500);
-    }
     return Results.Ok(result);
 });
 
@@ -209,10 +205,6 @@ app.MapPost("/api/semantic/embed", async (SemanticEmbedRequest request, Semantic
     }
 
     var result = await service.GenerateEmbeddingsAsync(request);
-    if (!result.Success)
-    {
-        return Results.Json(result, statusCode: 500);
-    }
     return Results.Ok(result);
 });
 
@@ -224,10 +216,6 @@ app.MapPost("/api/semantic/reduce", async (SemanticReduceRequest request, Semant
     }
 
     var result = await service.ReduceDimensionAsync(request);
-    if (!result.Success)
-    {
-        return Results.Json(result, statusCode: 500);
-    }
     return Results.Ok(result);
 });
 
@@ -239,10 +227,6 @@ app.MapPost("/api/semantic/cluster", async (SemanticClusterRequest request, Sema
     }
 
     var result = await service.ClusterSemanticAsync(request);
-    if (!result.Success)
-    {
-        return Results.Json(result, statusCode: 500);
-    }
     return Results.Ok(result);
 });
 
