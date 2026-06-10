@@ -13,3 +13,7 @@ matplotlib
 --extra-index-url https://pypi.nvidia.com
 cuml-cu12
 python-dotenv
+openai
+httpx
+sentence-transformers
+hdbscan
