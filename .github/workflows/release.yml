@@ -1,0 +1,166 @@
+name: Build and Release Installers
+
+on:
+  workflow_dispatch:  # Permite ejecutarlo manualmente
+  push:
+    tags:
+      - 'v*'          # Se ejecuta solo al crear un tag (ej: v1.0.0)
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build Frontend
+        working-directory: ./frontend
+        run: |
+          npm install
+          npm run build
+
+      - name: Build Backend (Windows)
+        working-directory: ./backend/src/LabSOM.Backend.Core
+        run: dotnet publish -c Release -r win-x64 --self-contained true -o ../../../publish
+
+      - name: Compile Inno Setup Installer
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        with:
+          path: installer-lite.iss
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SinapsisMap_Windows
+          path: Output/SinapsisMap_Installer_Lite.exe
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build Frontend
+        working-directory: ./frontend
+        run: |
+          npm install
+          npm run build
+
+      - name: Build Backend (Linux)
+        working-directory: ./backend/src/LabSOM.Backend.Core
+        run: dotnet publish -c Release -r linux-x64 --self-contained true -o ../../../publish_linux
+
+      - name: Package .deb
+        run: |
+          mkdir -p package/opt/SinapsisMap
+          mkdir -p package/DEBIAN
+          mkdir -p package/usr/share/applications
+
+          # Copiar binarios y Python engine
+          cp -r publish_linux/* package/opt/SinapsisMap/
+          cp -r engine package/opt/SinapsisMap/
+          
+          # Archivo de control de Debian
+          cat <<EOF > package/DEBIAN/control
+          Package: sinapsismap
+          Version: 1.0.0
+          Section: custom
+          Priority: optional
+          Architecture: amd64
+          Maintainer: LabSOM Team
+          Description: Sinapsis Map - Bibliometrics and SOM analysis tool.
+          EOF
+          
+          # Construir .deb
+          dpkg-deb --build package SinapsisMap_Linux.deb
+
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SinapsisMap_Linux
+          path: SinapsisMap_Linux.deb
+
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build Frontend
+        working-directory: ./frontend
+        run: |
+          npm install
+          npm run build
+
+      - name: Build Backend (macOS)
+        working-directory: ./backend/src/LabSOM.Backend.Core
+        run: dotnet publish -c Release -r osx-x64 --self-contained true -o ../../../publish_mac
+
+      - name: Create macOS App Bundle and DMG
+        run: |
+          mkdir -p "SinapsisMap.app/Contents/MacOS"
+          mkdir -p "SinapsisMap.app/Contents/Resources"
+          
+          # Copiar ejecutable principal
+          cp -r publish_mac/* "SinapsisMap.app/Contents/MacOS/"
+          # Copiar scripts de python
+          cp -r engine "SinapsisMap.app/Contents/MacOS/"
+          
+          # Copiar Info.plist
+          cp backend/src/LabSOM.Backend.Core/Info.plist "SinapsisMap.app/Contents/"
+          
+          # Crear DMG usando hdiutil
+          hdiutil create -volname "Sinapsis Map" -srcfolder "SinapsisMap.app" -ov -format UDZO SinapsisMap_Mac.dmg
+
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SinapsisMap_Mac
+          path: SinapsisMap_Mac.dmg
+
+  release:
+    needs: [build-windows, build-linux, build-mac]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/SinapsisMap_Windows/SinapsisMap_Installer_Lite.exe
+            artifacts/SinapsisMap_Linux/SinapsisMap_Linux.deb
+            artifacts/SinapsisMap_Mac/SinapsisMap_Mac.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
