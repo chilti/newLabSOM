@@ -32,8 +32,10 @@ namespace LabSOM.Backend.Core.Services
         {
             var scriptPath = Path.GetFullPath(Path.Combine(_enginePath, "main_engine.py"));
             
-            // Create a safe temporary directory
-            string tempDir = Path.GetFullPath(Path.Combine(_enginePath, "temp"));
+            // Use the OS temp folder (always writable) instead of engine\temp which may be
+            // inside Program Files or another protected directory.
+            // Resolves to: C:\Users\<user>\AppData\Local\Temp\SinapsisMap\
+            string tempDir = Path.Combine(Path.GetTempPath(), "SinapsisMap");
             if (!Directory.Exists(tempDir))
             {
                 Directory.CreateDirectory(tempDir);
