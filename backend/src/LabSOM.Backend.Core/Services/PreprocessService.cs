@@ -40,7 +40,11 @@ namespace LabSOM.Backend.Core.Services
             }
             
             string payloadFile = Path.Combine(tempDir, $"preprocess_{Guid.NewGuid():N}.json");
-            string sourceDataFile = Path.Combine(tempDir, $"data_{Guid.NewGuid():N}.txt");
+            // Preserve the original file extension so MetaKnowledge can detect the format correctly
+            // (e.g. Scopus .csv, PubMed .txt, BibTeX .bib, Web of Science .txt)
+            string uploadedExt = Path.GetExtension(uploadedFile.FileName);
+            if (string.IsNullOrEmpty(uploadedExt)) uploadedExt = ".txt";
+            string sourceDataFile = Path.Combine(tempDir, $"data_{Guid.NewGuid():N}{uploadedExt}");
             
             try
             {
