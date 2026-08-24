@@ -239,6 +239,7 @@ export default function App() {
       return;
     }
     const finalCustomTag = networkType.startsWith('bipartite') ? `${customTag},${customTag2}` : customTag;
+    const windowSize = temporal ? temporalWindow : 1;
     await preprocessBibliometrics(
       sharedBibFile,
       networkType,
@@ -250,8 +251,12 @@ export default function App() {
       extractionSource,
       countingMethod,
       thesaurusFile,
-      relevanceRatio
+      relevanceRatio,
+      windowSize
     );
+    if (temporal && windowSize >= 5) {
+      setBiblioMainView('longitudinal');
+    }
   };
 
   // Dynamic padding based on collapsed statebar
@@ -1005,14 +1010,14 @@ export default function App() {
                         {temporal && (
                           <div className="p-3 bg-gray-950/80 border border-gray-800 rounded-xl space-y-2.5">
                             <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider">
-                              Tamaño de Subperiodo (Años)
+                              Subperiod Window Size (Years)
                             </label>
                             <div className="grid grid-cols-4 gap-1.5 text-xs">
                               {[
-                                { val: 1, label: '1 Año', mode: 'PathSOM' },
-                                { val: 2, label: '2 Años', mode: 'PathSOM' },
-                                { val: 3, label: '3 Años', mode: 'PathSOM' },
-                                { val: 5, label: '5 Años', mode: 'Longitudinal' }
+                                { val: 1, label: '1 Year', mode: 'PathSOM' },
+                                { val: 2, label: '2 Years', mode: 'PathSOM' },
+                                { val: 3, label: '3 Years', mode: 'PathSOM' },
+                                { val: 5, label: '5 Years', mode: 'Longitudinal' }
                               ].map(opt => (
                                 <button
                                   key={opt.val}
@@ -1035,7 +1040,7 @@ export default function App() {
 
                             {/* Custom window input */}
                             <div className="flex items-center space-x-2 pt-1">
-                              <span className="text-[11px] text-gray-500">Personalizado:</span>
+                              <span className="text-[11px] text-gray-500">Custom:</span>
                               <input
                                 type="number"
                                 min="1"
@@ -1048,7 +1053,7 @@ export default function App() {
                                 }}
                                 className="w-16 bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white font-mono text-center focus:outline-none"
                               />
-                              <span className="text-[11px] text-gray-500">años por subperiodo</span>
+                              <span className="text-[11px] text-gray-500">years per subperiod</span>
                             </div>
 
                             {/* Dynamic explanation badge */}
@@ -1059,11 +1064,11 @@ export default function App() {
                             }`}>
                               {temporalWindow >= 5 ? (
                                 <span>
-                                  🔥 <strong>Modo Longitudinal SOM:</strong> Se generarán mapas evolutivos encadenados con <em>Warm-Start</em> ($W_t = W_{'{'}t-1{'}'}$) y refinamiento acelerado (20% iteraciones).
+                                  🔥 <strong>Longitudinal SOM Mode:</strong> Generates chained evolutionary maps with <em>Warm-Start</em> ($W_t = W_{'{'}t-1{'}'}$) and accelerated fine-tuning (20% iterations).
                                 </span>
                               ) : (
                                 <span>
-                                  📈 <strong>Modo Trayectorias PathSOM:</strong> Se proyectarán vectores de frecuencia anuales sobre un único espacio SOM global.
+                                  📈 <strong>PathSOM Trajectory Mode:</strong> Multi-period frequency vectors projected onto a single global SOM space.
                                 </span>
                               )}
                             </div>
@@ -1114,7 +1119,7 @@ export default function App() {
                     {cooccurrenceMatricesByPeriod && Object.keys(cooccurrenceMatricesByPeriod).length >= 2 && (
                       <div className="flex items-center justify-between bg-gray-900/90 border border-gray-800 rounded-2xl p-2 px-3 shadow-lg">
                         <span className="text-xs font-bold text-gray-300">
-                          Vista Científica:
+                          Scientific View:
                         </span>
                         <div className="flex space-x-1.5 bg-gray-950 p-1 rounded-xl border border-gray-800">
                           <button
@@ -1126,7 +1131,7 @@ export default function App() {
                             }`}
                           >
                             <Share2 className="w-3.5 h-3.5" />
-                            <span>Red Bibliométrica</span>
+                            <span>Bibliometric Network</span>
                           </button>
                           <button
                             onClick={() => setBiblioMainView('longitudinal')}
@@ -1137,7 +1142,7 @@ export default function App() {
                             }`}
                           >
                             <TrendingUp className="w-3.5 h-3.5" />
-                            <span>Evolución Longitudinal SOM</span>
+                            <span>Longitudinal SOM Evolution</span>
                           </button>
                         </div>
                       </div>

@@ -363,7 +363,8 @@ interface SOMState {
     extractionSource?: 'keywords' | 'title_abstract' | 'title' | 'abstract',
     countingMethod?: 'full' | 'fractional',
     thesaurusFile?: File | null,
-    relevanceRatio?: number
+    relevanceRatio?: number,
+    temporalWindow?: number
   ) => Promise<void>;
   queryBibliometricsApi: (params: {
     source: 'openalex' | 'crossref';
