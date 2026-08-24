@@ -8,8 +8,9 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from hardware_detector import detect_hardware
 from bibliometrics_parser import read_and_generate_bibliometrics
-from som_solver import SOMSolver, run_umap
+from som_solver import SOMSolver, run_umap, recommend_training_epochs, compute_weight_drift
 from incites_parser import extract_and_parse_incites, build_incites_inventory, parse_single_unit_from_session
+import torch
 
 def handle_detect():
     hw = detect_hardware()
@@ -26,6 +27,7 @@ def handle_preprocess(params):
     counting_method = params.get("counting_method", "full")
     thesaurus_filepath = params.get("thesaurus_filepath", None)
     relevance_ratio = params.get("relevance_ratio", 0.60)
+    temporal_window = int(params.get("temporal_window", params.get("temporalWindow", 1)))
     
     if not filepath or not os.path.exists(filepath):
         return {"success": False, "error": f"File not found: '{filepath}'"}
@@ -41,7 +43,8 @@ def handle_preprocess(params):
             extraction_source=extraction_source,
             counting_method=counting_method,
             thesaurus_filepath=thesaurus_filepath,
-            relevance_ratio=relevance_ratio
+            relevance_ratio=relevance_ratio,
+            temporal_window=temporal_window
         )
         
         return res_dict
@@ -130,6 +133,11 @@ def handle_suggest_size(params):
     
     recommended = "big" if N <= 1000 else "small"
     
+    # Teuvo Kohonen's recommended epoch criteria
+    rec_epochs_batch = 100
+    rec_epochs_seq_big = recommend_training_epochs(N, big_width * big_height, method="basic")
+    rec_epochs_seq_small = recommend_training_epochs(N, small_width * small_height, method="basic")
+    
     return {
         "success": True,
         "N": N,
@@ -137,7 +145,10 @@ def handle_suggest_size(params):
         "bigSomWidth": big_width,
         "bigSomHeight": big_height,
         "smallSomWidth": small_width,
-        "smallSomHeight": small_height
+        "smallSomHeight": small_height,
+        "recommendedEpochsBatch": rec_epochs_batch,
+        "recommendedEpochsSequentialBig": rec_epochs_seq_big,
+        "recommendedEpochsSequentialSmall": rec_epochs_seq_small
     }
 
 def handle_train(params):
@@ -225,6 +236,118 @@ def handle_train(params):
         return {
             "success": False, 
             "error": f"Training error: {str(e)}", 
+            "traceback": traceback.format_exc()
+        }
+
+def handle_train_longitudinal(params):
+    """
+    Executes Longitudinal SOM training (Evolving Self-Organizing Maps) across multi-year periods.
+    Protocol:
+      - Period 1 (Base): Initialized with PCA/Linear, trained with 100% iterations (Full two-phase).
+      - Successive Periods: Initialized with Warm-Start weights W_{t-1}*, trained with refinement-only
+        (20% iterations, sigma_0 = 1.0), preserving topological alignment across time.
+      - Calculates weight drift Delta W per neuron between consecutive periods.
+    """
+    periods_data = params.get("periods_data", {})
+    if not periods_data:
+        return {"success": False, "error": "No periods data provided for longitudinal training."}
+
+    rows = params.get("rows", 10)
+    cols = params.get("cols", 10)
+    base_iterations = params.get("iterations", 100)
+    method = params.get("method", "batch").lower()
+    init_type = params.get("init", "pca").lower()
+    metric = params.get("metric", "euclidean").lower()
+    learning_rate = params.get("learning_rate", 0.5)
+    clustering_algorithm = params.get("clustering_algorithm", "dbscan").lower()
+    n_clusters = params.get("n_clusters", 4)
+    eps = params.get("eps", 0.5)
+    min_samples = params.get("min_samples", 3)
+    run_umap_flag = params.get("run_umap", False)
+    fallback_level = params.get("fallback_level", 3)
+
+    try:
+        # Sort period keys chronologically
+        sorted_periods = sorted(list(periods_data.keys()))
+        maps = {}
+        drift_metrics = {}
+        prev_weights = None
+        prev_weights_list = None
+
+        for idx, period_key in enumerate(sorted_periods):
+            p_obj = periods_data[period_key]
+            data_arr = np.array(p_obj.get("data", []), dtype=np.float64)
+            labels = p_obj.get("labels", [])
+
+            if data_arr.size == 0:
+                continue
+
+            input_dim = data_arr.shape[1]
+            solver = SOMSolver(rows, cols, input_dim, grid_type="hexagonal", metric=metric)
+
+            if idx == 0 or prev_weights is None:
+                # Base period: Full training from scratch
+                solver.initialize_weights(data_arr, init_type=init_type)
+                if method == "basic":
+                    errors = solver.train_basic(data_arr, base_iterations, learning_rate_start=learning_rate)
+                else:
+                    errors = solver.train_batch(data_arr, base_iterations)
+                training_phase = "base_full"
+                effective_iters = base_iterations
+            else:
+                # Successive periods: Warm-start fine-tuning
+                solver.weights = prev_weights.clone()
+                solver.grid_dist = torch.tensor(solver.grid_dist_np, dtype=torch.float64, device=solver.device)
+                solver.coords = torch.tensor(solver.coords_np, dtype=torch.float64, device=solver.device)
+                refine_iters = max(10, int(0.20 * base_iterations))
+                if method == "basic":
+                    errors = solver.train_basic(data_arr, refine_iters, learning_rate_start=0.05, sigma_start=1.0)
+                else:
+                    errors = solver.train_batch(data_arr, refine_iters, sigma_start=1.0)
+                training_phase = "warm_start_refine"
+                effective_iters = refine_iters
+
+            res = solver.extract_results(
+                data_arr, 
+                labels=labels, 
+                clustering_algorithm=clustering_algorithm, 
+                n_clusters=n_clusters, 
+                eps=eps, 
+                min_samples=min_samples
+            )
+            res["errors"] = errors
+            res["period"] = period_key
+            res["training_phase"] = training_phase
+            res["iterations"] = effective_iters
+            res["doc_count"] = p_obj.get("doc_count", len(data_arr))
+
+            if run_umap_flag:
+                umap_emb, umap_src = run_umap(data_arr, fallback_level=fallback_level, n_components=2)
+                res["umap"] = umap_emb
+                res["umap_source"] = umap_src
+
+            if idx > 0 and prev_weights_list is not None:
+                drift = compute_weight_drift(prev_weights_list, res["weights"])
+                drift_key = f"{sorted_periods[idx-1]} -> {period_key}"
+                drift_metrics[drift_key] = drift
+                res["drift_from_prev"] = drift
+
+            maps[period_key] = res
+            prev_weights = solver.weights.clone()
+            prev_weights_list = res["weights"]
+
+        return {
+            "success": True,
+            "is_longitudinal": True,
+            "periods": sorted_periods,
+            "maps": maps,
+            "drift_metrics": drift_metrics
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "error": f"Longitudinal training error: {str(e)}",
             "traceback": traceback.format_exc()
         }
 
@@ -534,6 +657,9 @@ def main():
             print(json.dumps(res))
     elif action == "train":
         res = handle_train(params)
+        print(json.dumps(res))
+    elif action == "train_longitudinal":
+        res = handle_train_longitudinal(params)
         print(json.dumps(res))
     elif action == "suggest_size":
         res = handle_suggest_size(params)

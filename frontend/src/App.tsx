@@ -6,6 +6,7 @@ import { DimReduction } from './components/DimReduction';
 import { SemanticBibliometrics } from './components/SemanticBibliometrics';
 import { InCitesExplorer } from './components/InCitesExplorer';
 import { AiAssistantTab } from './components/AiAssistantTab';
+import { LongitudinalSomViewer } from './components/LongitudinalSomViewer';
 import { useAiStore } from './store/aiStore';
 import { useAuthStore } from './store/authStore';
 import { LoginScreen } from './components/LoginScreen';
@@ -14,7 +15,7 @@ import { UserManagementModal } from './components/UserManagementModal';
 import { ProjectsDrawer } from './components/ProjectsDrawer';
 import { LlmConfigModal } from './components/LlmConfigModal';
 import { VosApiModal } from './components/vos/VosApiModal';
-import { Database, Share2, Sliders, ArrowRight, RefreshCw, ChevronLeft, ChevronRight, Settings, Upload, Save, FolderOpen, FolderX, Layers, Compass, BarChart2, ChevronDown, BookOpen, Cloud, User as UserIcon, LogIn, LogOut, Shield, Bot, Key } from 'lucide-react';
+import { Database, Share2, Sliders, ArrowRight, RefreshCw, ChevronLeft, ChevronRight, Settings, Upload, Save, FolderOpen, FolderX, Layers, Compass, BarChart2, ChevronDown, BookOpen, Cloud, User as UserIcon, LogIn, LogOut, Shield, Bot, Key, TrendingUp } from 'lucide-react';
 
 const isDesktopApp = typeof (window as any).external?.sendMessage === 'function';
 
@@ -32,12 +33,17 @@ export default function App() {
     uploadProgress,
     exportProject,
     importProject,
-    clearProject
+    clearProject,
+    temporalWindow,
+    setTemporalWindow,
+    cooccurrenceMatricesByPeriod,
+    setTemporalAnalysisMode
   } = useSomStore();
 
   const { llmConfig, openLlmConfigModal } = useAiStore();
   const { isWebMode, isAuthenticated, user, checkAuth, saveCloudProject, logout, isLoading: isAuthLoading } = useAuthStore();
 
+  const [biblioMainView, setBiblioMainView] = useState<'network' | 'longitudinal'>('network');
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isUserMgmtModalOpen, setIsUserMgmtModalOpen] = useState(false);
   const [isProjectsDrawerOpen, setIsProjectsDrawerOpen] = useState(false);
@@ -992,9 +998,77 @@ export default function App() {
                             className="w-4 h-4 bg-gray-950 border-gray-800 rounded text-emerald-500 focus:ring-emerald-500 cursor-pointer"
                           />
                           <label htmlFor="temporal" className="text-xs text-gray-200 cursor-pointer select-none font-bold uppercase tracking-wide">
-                            Generate Temporal Sequences (PathSOM)
+                            Generate Temporal Sequences
                           </label>
                         </div>
+
+                        {temporal && (
+                          <div className="p-3 bg-gray-950/80 border border-gray-800 rounded-xl space-y-2.5">
+                            <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider">
+                              Tamaño de Subperiodo (Años)
+                            </label>
+                            <div className="grid grid-cols-4 gap-1.5 text-xs">
+                              {[
+                                { val: 1, label: '1 Año', mode: 'PathSOM' },
+                                { val: 2, label: '2 Años', mode: 'PathSOM' },
+                                { val: 3, label: '3 Años', mode: 'PathSOM' },
+                                { val: 5, label: '5 Años', mode: 'Longitudinal' }
+                              ].map(opt => (
+                                <button
+                                  key={opt.val}
+                                  type="button"
+                                  onClick={() => {
+                                    setTemporalWindow(opt.val);
+                                    setTemporalAnalysisMode(opt.val >= 5 ? 'longitudinal' : 'pathsom');
+                                  }}
+                                  className={`py-1.5 rounded-lg font-bold transition flex flex-col items-center justify-center ${
+                                    temporalWindow === opt.val
+                                      ? 'bg-indigo-600 text-white shadow-md'
+                                      : 'bg-gray-900 text-gray-400 hover:text-gray-200 hover:bg-gray-800'
+                                  }`}
+                                >
+                                  <span>{opt.label}</span>
+                                  <span className="text-[9px] opacity-75 font-normal">{opt.mode}</span>
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* Custom window input */}
+                            <div className="flex items-center space-x-2 pt-1">
+                              <span className="text-[11px] text-gray-500">Personalizado:</span>
+                              <input
+                                type="number"
+                                min="1"
+                                max="20"
+                                value={temporalWindow}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value) || 1;
+                                  setTemporalWindow(val);
+                                  setTemporalAnalysisMode(val >= 5 ? 'longitudinal' : 'pathsom');
+                                }}
+                                className="w-16 bg-gray-900 border border-gray-800 rounded-lg px-2 py-1 text-xs text-white font-mono text-center focus:outline-none"
+                              />
+                              <span className="text-[11px] text-gray-500">años por subperiodo</span>
+                            </div>
+
+                            {/* Dynamic explanation badge */}
+                            <div className={`p-2 rounded-lg border text-[11px] leading-relaxed ${
+                              temporalWindow >= 5
+                                ? 'bg-purple-950/40 border-purple-800/60 text-purple-200'
+                                : 'bg-indigo-950/40 border-indigo-800/60 text-indigo-200'
+                            }`}>
+                              {temporalWindow >= 5 ? (
+                                <span>
+                                  🔥 <strong>Modo Longitudinal SOM:</strong> Se generarán mapas evolutivos encadenados con <em>Warm-Start</em> ($W_t = W_{'{'}t-1{'}'}$) y refinamiento acelerado (20% iteraciones).
+                                </span>
+                              ) : (
+                                <span>
+                                  📈 <strong>Modo Trayectorias PathSOM:</strong> Se proyectarán vectores de frecuencia anuales sobre un único espacio SOM global.
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       <button
@@ -1035,9 +1109,47 @@ export default function App() {
                     </form>
                   </div>
 
-                  {/* Interactive Network Graph */}
-                  <div className="lg:col-span-2">
-                    <RedBibliometrica />
+                  {/* Interactive Network Graph or Longitudinal SOM */}
+                  <div className="lg:col-span-2 flex flex-col space-y-4">
+                    {cooccurrenceMatricesByPeriod && Object.keys(cooccurrenceMatricesByPeriod).length >= 2 && (
+                      <div className="flex items-center justify-between bg-gray-900/90 border border-gray-800 rounded-2xl p-2 px-3 shadow-lg">
+                        <span className="text-xs font-bold text-gray-300">
+                          Vista Científica:
+                        </span>
+                        <div className="flex space-x-1.5 bg-gray-950 p-1 rounded-xl border border-gray-800">
+                          <button
+                            onClick={() => setBiblioMainView('network')}
+                            className={`px-3 py-1 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 ${
+                              biblioMainView === 'network'
+                                ? 'bg-indigo-600 text-white shadow-md'
+                                : 'text-gray-400 hover:text-gray-200'
+                            }`}
+                          >
+                            <Share2 className="w-3.5 h-3.5" />
+                            <span>Red Bibliométrica</span>
+                          </button>
+                          <button
+                            onClick={() => setBiblioMainView('longitudinal')}
+                            className={`px-3 py-1 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 ${
+                              biblioMainView === 'longitudinal'
+                                ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md'
+                                : 'text-gray-400 hover:text-gray-200'
+                            }`}
+                          >
+                            <TrendingUp className="w-3.5 h-3.5" />
+                            <span>Evolución Longitudinal SOM</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex-1">
+                      {biblioMainView === 'longitudinal' && cooccurrenceMatricesByPeriod && Object.keys(cooccurrenceMatricesByPeriod).length >= 2 ? (
+                        <LongitudinalSomViewer />
+                      ) : (
+                        <RedBibliometrica />
+                      )}
+                    </div>
                   </div>
                 </div>
               )}

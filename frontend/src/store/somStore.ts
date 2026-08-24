@@ -53,6 +53,38 @@ export interface TrainingResult {
   umapSource: string | null;
 }
 
+export interface LongitudinalDriftMetric {
+  raw_drift?: number[];
+  normalized_drift?: number[];
+  mean_drift: number;
+  max_drift: number;
+}
+
+export interface LongitudinalPeriodResult extends TrainingResult {
+  period: string;
+  training_phase: 'base_full' | 'warm_start_refine';
+  iterations: number;
+  doc_count?: number;
+  drift_from_prev?: LongitudinalDriftMetric;
+}
+
+export interface LongitudinalSOMTrainingResult {
+  success: boolean;
+  error?: string;
+  is_longitudinal: boolean;
+  periods: string[];
+  maps: Record<string, LongitudinalPeriodResult>;
+  drift_metrics: Record<string, LongitudinalDriftMetric>;
+}
+
+export interface SubperiodMatrixItem {
+  data: number[][];
+  labels: string[];
+  doc_count: number;
+  start_year: number;
+  end_year: number;
+}
+
 export interface HardwareInfo {
   level: number;
   device: string;
@@ -181,6 +213,19 @@ interface SOMState {
   cooccurrenceCsv: string | null;
   pendingNetworkCsv: string | null;
   pendingNetworkOrigin: 'monothematic' | 'bipartite' | null;
+  
+  // Longitudinal SOM & Subperiod State
+  temporalWindow: number;
+  setTemporalWindow: (w: number) => void;
+  temporalAnalysisMode: 'pathsom' | 'longitudinal';
+  setTemporalAnalysisMode: (mode: 'pathsom' | 'longitudinal') => void;
+  longitudinalResults: LongitudinalSOMTrainingResult | null;
+  setLongitudinalResults: (results: LongitudinalSOMTrainingResult | null) => void;
+  activeLongitudinalPeriod: string;
+  setActiveLongitudinalPeriod: (period: string) => void;
+  cooccurrenceMatricesByPeriod: Record<string, SubperiodMatrixItem> | null;
+  setCooccurrenceMatricesByPeriod: (matrices: Record<string, SubperiodMatrixItem> | null) => void;
+  trainLongitudinalSOM: () => Promise<boolean>;
   
   // Training outputs
   result: TrainingResult | null;
@@ -741,6 +786,18 @@ export const useSomStore = create<SOMState>((set, get) => ({
     }));
   },
 
+  // Longitudinal SOM & Subperiod State
+  temporalWindow: 1,
+  setTemporalWindow: (temporalWindow) => set({ temporalWindow }),
+  temporalAnalysisMode: 'pathsom',
+  setTemporalAnalysisMode: (temporalAnalysisMode) => set({ temporalAnalysisMode }),
+  longitudinalResults: null,
+  setLongitudinalResults: (longitudinalResults) => set({ longitudinalResults }),
+  activeLongitudinalPeriod: '',
+  setActiveLongitudinalPeriod: (activeLongitudinalPeriod) => set({ activeLongitudinalPeriod }),
+  cooccurrenceMatricesByPeriod: null,
+  setCooccurrenceMatricesByPeriod: (cooccurrenceMatricesByPeriod) => set({ cooccurrenceMatricesByPeriod }),
+
   // Time-Series Preprocessing
   isCmaSmoothingActive: false,
   cmaWindowSize: 3,
@@ -954,7 +1011,8 @@ export const useSomStore = create<SOMState>((set, get) => ({
     extractionSource?: 'keywords' | 'title_abstract' | 'title' | 'abstract',
     countingMethod?: 'full' | 'fractional',
     thesaurusFile?: File | null,
-    relevanceRatio?: number
+    relevanceRatio?: number,
+    temporalWindow?: number
   ) => {
     set({ isPreprocessing: true, uploadProgress: 0 });
     
@@ -971,6 +1029,7 @@ export const useSomStore = create<SOMState>((set, get) => ({
       if (countingMethod) formData.append('countingMethod', countingMethod);
       if (thesaurusFile) formData.append('thesaurusFile', thesaurusFile);
       if (relevanceRatio !== undefined) formData.append('relevanceRatio', relevanceRatio.toString());
+      if (temporalWindow !== undefined) formData.append('temporalWindow', temporalWindow.toString());
 
       const responseText = await new Promise<string>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -1018,6 +1077,10 @@ export const useSomStore = create<SOMState>((set, get) => ({
           get().loadCsvData(networkCsv, 0, [], origin);
         }
         
+        const effectiveWindow = result.temporal_window || temporalWindow || 1;
+        const hasSubperiods = result.cooccurrence_matrices_by_period && Object.keys(result.cooccurrence_matrices_by_period).length >= 2;
+        const autoMode = (effectiveWindow >= 5 && hasSubperiods) ? 'longitudinal' : 'pathsom';
+
         set({
           dataMatrix: get().dataMatrix,
           originalDataMatrix: null,
@@ -1032,6 +1095,9 @@ export const useSomStore = create<SOMState>((set, get) => ({
           network: networkType === 'bipartite' ? null : result.network,
           vosviewerJson: result.vosviewer_json || null,
           networksByYear: result.networks_by_year || null,
+          cooccurrenceMatricesByPeriod: result.cooccurrence_matrices_by_period || null,
+          temporalWindow: effectiveWindow,
+          temporalAnalysisMode: autoMode,
           cooccurrenceCsv: result.cooccurrence_csv || null,
           biblioActiveView: 'force',
           isPreprocessing: false,
@@ -1320,6 +1386,99 @@ export const useSomStore = create<SOMState>((set, get) => ({
     }
   },
 
+  trainLongitudinalSOM: async (): Promise<boolean> => {
+    const { cooccurrenceMatricesByPeriod, config, hardware } = get();
+    if (!cooccurrenceMatricesByPeriod || Object.keys(cooccurrenceMatricesByPeriod).length === 0) {
+      alert("No hay matrices de subperiodos disponibles para el entrenamiento longitudinal.");
+      return false;
+    }
+
+    set({ isTraining: true });
+    try {
+      const periodsData: Record<string, any> = {};
+      for (const [period, item] of Object.entries(cooccurrenceMatricesByPeriod)) {
+        periodsData[period] = {
+          data: item.data,
+          labels: item.labels,
+          doc_count: item.doc_count
+        };
+      }
+
+      const payload = {
+        periods_data: periodsData,
+        rows: config.rows,
+        cols: config.cols,
+        iterations: config.iterations,
+        method: config.method,
+        init: config.init,
+        metric: config.metric,
+        learning_rate: config.learningRate,
+        clustering_algorithm: config.clusteringAlgorithm,
+        n_clusters: config.nClusters,
+        eps: config.eps,
+        min_samples: config.minSamples,
+        fallback_level: hardware?.level ?? 3,
+        run_umap: true
+      };
+
+      const res = await fetch(getApiUrl('/api/som/train-longitudinal'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const resJson = await res.json();
+      if (resJson?.success && resJson.maps) {
+        const formattedMaps: Record<string, LongitudinalPeriodResult> = {};
+        for (const [pKey, pMap] of Object.entries(resJson.maps as Record<string, any>)) {
+          formattedMaps[pKey] = {
+            period: pKey,
+            training_phase: pMap.training_phase,
+            iterations: pMap.iterations,
+            doc_count: pMap.doc_count,
+            weights: pMap.weights,
+            umatrix: pMap.umatrix,
+            clustering: pMap.clustering,
+            frequencies: pMap.frequencies,
+            quantizationErrors: pMap.quantization_errors,
+            bmus: pMap.bmus,
+            hexGrid: pMap.hex_grid,
+            mappedLabels: pMap.mapped_labels,
+            errors: pMap.errors,
+            umap: pMap.umap || null,
+            umapSource: pMap.umap_source || null,
+            drift_from_prev: pMap.drift_from_prev
+          };
+        }
+
+        const periodsList = resJson.periods || Object.keys(formattedMaps);
+        const firstPeriod = periodsList[0] || '';
+
+        set({
+          longitudinalResults: {
+            success: true,
+            is_longitudinal: true,
+            periods: periodsList,
+            maps: formattedMaps,
+            drift_metrics: resJson.drift_metrics || {}
+          },
+          activeLongitudinalPeriod: firstPeriod,
+          isTraining: false
+        });
+        return true;
+      } else {
+        alert("Error en entrenamiento longitudinal: " + (resJson?.error || "Error desconocido"));
+        set({ isTraining: false });
+        return false;
+      }
+    } catch (e: any) {
+      console.error(e);
+      alert("Error al conectar con el servidor: " + (e.message || "Error desconocido"));
+      set({ isTraining: false });
+      return false;
+    }
+  },
+
   moveLabel: (label, fromBmu, toBmu) => {
     set((state) => {
       if (!state.result) return {};
@@ -1405,6 +1564,11 @@ export const useSomStore = create<SOMState>((set, get) => ({
       cooccurrenceCsv: state.cooccurrenceCsv,
       pendingNetworkCsv: state.pendingNetworkCsv,
       pendingNetworkOrigin: state.pendingNetworkOrigin,
+      cooccurrenceMatricesByPeriod: state.cooccurrenceMatricesByPeriod,
+      temporalWindow: state.temporalWindow,
+      temporalAnalysisMode: state.temporalAnalysisMode,
+      longitudinalResults: state.longitudinalResults,
+      activeLongitudinalPeriod: state.activeLongitudinalPeriod,
       result: state.result,
       isCmaSmoothingActive: state.isCmaSmoothingActive,
       cmaWindowSize: state.cmaWindowSize,
@@ -1553,6 +1717,13 @@ export const useSomStore = create<SOMState>((set, get) => ({
           dimManualResult: projectData.dimManualResult || null,
           dimTargetD: projectData.dimTargetD ?? 2,
           dimReducedData: projectData.dimReducedData || null,
+
+          // Longitudinal SOM & Subperiods
+          temporalWindow: projectData.temporalWindow || 1,
+          temporalAnalysisMode: projectData.temporalAnalysisMode || 'pathsom',
+          cooccurrenceMatricesByPeriod: projectData.cooccurrenceMatricesByPeriod || null,
+          longitudinalResults: projectData.longitudinalResults || null,
+          activeLongitudinalPeriod: projectData.activeLongitudinalPeriod || (projectData.longitudinalResults?.periods?.[0] || ''),
 
           // PathSOM / Trajectories & Customizations
           activeTrajectories: new Set(projectData.activeTrajectories || []),

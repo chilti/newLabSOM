@@ -242,6 +242,84 @@ class SOMSolver:
         
         return bmus.cpu().tolist(), normalized_freq.cpu().tolist(), normalized_qe.cpu().tolist()
 
+    def extract_results(self, data, labels=None, clustering_algorithm="dbscan", n_clusters=4, eps=0.5, min_samples=3):
+        """Extracts complete SOM analysis metrics into a dictionary."""
+        umatrix = self.get_umatrix()
+        clustering = self.get_clustering(algorithm=clustering_algorithm, n_clusters=n_clusters, eps=eps, min_samples=min_samples)
+        bmus, frequencies, quantization_errors = self.get_bmus_and_frequencies(data)
+        
+        hex_grid = []
+        for i in range(self.rows * self.cols):
+            hex_grid.append({
+                "index": int(i),
+                "row": int(i // self.cols),
+                "col": int(i % self.cols),
+                "x": float(self.coords_np[i, 0]),
+                "y": float(self.coords_np[i, 1])
+            })
+            
+        weights_list = self.weights.cpu().tolist()
+        
+        mapped_labels = [[] for _ in range(self.rows * self.cols)]
+        if labels and len(labels) == len(bmus):
+            for doc_idx, bmu in enumerate(bmus):
+                mapped_labels[bmu].append(labels[doc_idx])
+                
+        return {
+            "weights": weights_list,
+            "umatrix": umatrix,
+            "clustering": clustering,
+            "frequencies": frequencies,
+            "quantization_errors": quantization_errors,
+            "bmus": bmus,
+            "hex_grid": hex_grid,
+            "mapped_labels": mapped_labels,
+            "errors": []
+        }
+
+
+def recommend_training_epochs(n_samples, n_neurons, method="batch"):
+    """
+    Teuvo Kohonen's canonical rule-of-thumb for recommended training epochs:
+    - Sequential SOM: Total sample presentations >= 500 * n_neurons.
+      Epochs = max(20, ceil(500 * n_neurons / n_samples))
+    - Batch SOM: Converges in matrix-level updates. 50-100 epochs standard.
+    """
+    if n_samples <= 0 or n_neurons <= 0:
+        return 100
+    if method.lower() == "basic":
+        epochs = int(np.ceil((500.0 * n_neurons) / max(1, n_samples)))
+        return max(20, min(epochs, 2000))
+    else:
+        # Batch mode recommendation
+        return 100
+
+
+def compute_weight_drift(weights_prev_list, weights_curr_list):
+    """
+    Computes per-neuron weight drift (Euclidean distance) between consecutive periods:
+    Delta W(i) = ||W_t(i) - W_{t-1}(i)||_2
+    Returns raw drift per neuron and min/max normalized drift.
+    """
+    W_prev = np.array(weights_prev_list, dtype=np.float64)
+    W_curr = np.array(weights_curr_list, dtype=np.float64)
+    
+    if W_prev.shape != W_curr.shape:
+        return {"raw_drift": [], "normalized_drift": [], "mean_drift": 0.0, "max_drift": 0.0}
+        
+    raw_drift = np.linalg.norm(W_curr - W_prev, axis=1)
+    max_d = float(np.max(raw_drift)) if len(raw_drift) > 0 else 0.0
+    mean_d = float(np.mean(raw_drift)) if len(raw_drift) > 0 else 0.0
+    
+    norm_drift = (raw_drift / max_d).tolist() if max_d > 0 else raw_drift.tolist()
+    
+    return {
+        "raw_drift": raw_drift.tolist(),
+        "normalized_drift": norm_drift,
+        "mean_drift": mean_d,
+        "max_drift": max_d
+    }
+
 def run_umap(data, fallback_level=3, n_components=2, n_neighbors=15, min_dist=0.1, metric="euclidean"):
     """
     Runs UMAP dimensionality reduction using the 3-level fallback mechanism.

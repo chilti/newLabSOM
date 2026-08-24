@@ -314,6 +314,9 @@ namespace LabSOM.Backend.Core.Services
         [JsonPropertyName("temporal")]
         public bool Temporal { get; set; } = false;
 
+        [JsonPropertyName("temporal_window")]
+        public int Temporal_Window { get; set; } = 1;
+
         [JsonPropertyName("extraction_source")]
         public string Extraction_Source { get; set; } = "keywords";
 
@@ -346,6 +349,9 @@ namespace LabSOM.Backend.Core.Services
         
         [JsonPropertyName("temporal")]
         public bool Temporal { get; set; } = false;
+
+        [JsonPropertyName("temporal_window")]
+        public int Temporal_Window { get; set; } = 1;
 
         [JsonPropertyName("extraction_source")]
         public string Extraction_Source { get; set; } = "keywords";
@@ -391,5 +397,11 @@ namespace LabSOM.Backend.Core.Services
 
         [JsonPropertyName("networks_by_year")]
         public JsonElement? Networks_By_Year { get; set; }
+
+        [JsonPropertyName("cooccurrence_matrices_by_period")]
+        public JsonElement? Cooccurrence_Matrices_By_Period { get; set; }
+
+        [JsonPropertyName("temporal_window")]
+        public int Temporal_Window { get; set; } = 1;
     }
 }

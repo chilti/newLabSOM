@@ -588,9 +588,110 @@ namespace LabSOM.Backend.Core.Services
                 if (File.Exists(tempFile)) File.Delete(tempFile);
             }
         }
+
+        public async Task<LongitudinalSOMTrainingResult> TrainLongitudinalAsync(LongitudinalSOMTrainingRequest request)
+        {
+            var scriptPath = Path.GetFullPath(Path.Combine(_enginePath, "main_engine.py"));
+            
+            string tempDir = Path.GetFullPath(Path.Combine(_enginePath, "temp"));
+            if (!Directory.Exists(tempDir))
+            {
+                Directory.CreateDirectory(tempDir);
+            }
+            
+            string tempFile = Path.Combine(tempDir, $"som_longitudinal_{Guid.NewGuid():N}.json");
+            
+            try
+            {
+                string jsonPayload = JsonSerializer.Serialize(request);
+                await File.WriteAllTextAsync(tempFile, jsonPayload);
+                
+                var psi = new ProcessStartInfo
+                {
+                    FileName = PythonUtils.GetPythonExecutablePath(_enginePath),
+                    Arguments = $"\"{scriptPath}\" train_longitudinal \"{tempFile}\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = new Process { StartInfo = psi };
+                process.Start();
+
+                var stdoutTask = process.StandardOutput.ReadToEndAsync();
+                var stderrTask = process.StandardError.ReadToEndAsync();
+                
+                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(60));
+                try
+                {
+                    await process.WaitForExitAsync(cts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    process.Kill(entireProcessTree: true);
+                    return new LongitudinalSOMTrainingResult
+                    {
+                        Success = false,
+                        Error = "Longitudinal training timed out after 60 minutes."
+                    };
+                }
+                
+                string stdout = await stdoutTask;
+                string stderr = await stderrTask;
+
+                if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(stdout))
+                {
+                    int jsonStart = stdout.IndexOf('{');
+                    string jsonOnly = jsonStart > 0 ? stdout[jsonStart..] : stdout;
+                    
+                    try
+                    {
+                        var result = JsonSerializer.Deserialize<LongitudinalSOMTrainingResult>(jsonOnly, new JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true
+                        });
+                        
+                        if (result != null)
+                        {
+                            return result;
+                        }
+                    }
+                    catch (JsonException jex)
+                    {
+                        return new LongitudinalSOMTrainingResult
+                        {
+                            Success = false,
+                            Error = $"JSON Deserialization failed: {jex.Message}. Output was: {stdout[..Math.Min(stdout.Length, 1000)]}"
+                        };
+                    }
+                }
+                
+                return new LongitudinalSOMTrainingResult
+                {
+                    Success = false,
+                    Error = $"Engine exited with code {process.ExitCode}. Stderr: {stderr}"
+                };
+            }
+            catch (Exception ex)
+            {
+                return new LongitudinalSOMTrainingResult
+                {
+                    Success = false,
+                    Error = $"Failed to execute Longitudinal SOM training: {ex.Message}"
+                };
+            }
+            finally
+            {
+                if (File.Exists(tempFile))
+                {
+                    try { File.Delete(tempFile); } catch { }
+                }
+            }
+        }
     }
 
-public class SOMTrainingRequest
+    public class SOMTrainingRequest
     {
         [JsonPropertyName("data")]
         public List<List<double>> Data { get; set; }
@@ -818,6 +919,99 @@ public class SOMTrainingRequest
         public List<List<double>> ReducedData { get; set; }
     }
 
+    public class LongitudinalPeriodData
+    {
+        [JsonPropertyName("data")]
+        public List<List<double>> Data { get; set; } = new();
+
+        [JsonPropertyName("labels")]
+        public List<string> Labels { get; set; } = new();
+
+        [JsonPropertyName("doc_count")]
+        public int DocCount { get; set; }
+    }
+
+    public class LongitudinalSOMTrainingRequest
+    {
+        [JsonPropertyName("periods_data")]
+        public Dictionary<string, LongitudinalPeriodData> PeriodsData { get; set; } = new();
+
+        [JsonPropertyName("rows")]
+        public int Rows { get; set; } = 10;
+
+        [JsonPropertyName("cols")]
+        public int Cols { get; set; } = 10;
+
+        [JsonPropertyName("iterations")]
+        public int Iterations { get; set; } = 100;
+
+        [JsonPropertyName("method")]
+        public string Method { get; set; } = "batch";
+
+        [JsonPropertyName("init")]
+        public string Init { get; set; } = "pca";
+
+        [JsonPropertyName("metric")]
+        public string Metric { get; set; } = "euclidean";
+
+        [JsonPropertyName("learning_rate")]
+        public double LearningRate { get; set; } = 0.5;
+
+        [JsonPropertyName("clustering_algorithm")]
+        public string ClusteringAlgorithm { get; set; } = "dbscan";
+
+        [JsonPropertyName("n_clusters")]
+        public int NClusters { get; set; } = 4;
+
+        [JsonPropertyName("eps")]
+        public double Eps { get; set; } = 0.5;
+
+        [JsonPropertyName("min_samples")]
+        public int MinSamples { get; set; } = 3;
+
+        [JsonPropertyName("run_umap")]
+        public bool RunUmap { get; set; } = false;
+
+        [JsonPropertyName("fallback_level")]
+        public int FallbackLevel { get; set; } = 3;
+    }
+
+    public class LongitudinalDriftMetric
+    {
+        [JsonPropertyName("raw_drift")]
+        public List<double>? RawDrift { get; set; }
+
+        [JsonPropertyName("normalized_drift")]
+        public List<double>? NormalizedDrift { get; set; }
+
+        [JsonPropertyName("mean_drift")]
+        public double MeanDrift { get; set; }
+
+        [JsonPropertyName("max_drift")]
+        public double MaxDrift { get; set; }
+    }
+
+    public class LongitudinalSOMTrainingResult
+    {
+        [JsonPropertyName("success")]
+        public bool Success { get; set; }
+
+        [JsonPropertyName("error")]
+        public string? Error { get; set; }
+
+        [JsonPropertyName("is_longitudinal")]
+        public bool IsLongitudinal { get; set; } = true;
+
+        [JsonPropertyName("periods")]
+        public List<string>? Periods { get; set; }
+
+        [JsonPropertyName("maps")]
+        public Dictionary<string, SOMTrainingResult>? Maps { get; set; }
+
+        [JsonPropertyName("drift_metrics")]
+        public Dictionary<string, LongitudinalDriftMetric>? DriftMetrics { get; set; }
+    }
+
     public class SuggestSizeRequest
     {
         [JsonPropertyName("data")]
@@ -849,5 +1043,14 @@ public class SOMTrainingRequest
 
         [JsonPropertyName("smallSomHeight")]
         public int SmallSomHeight { get; set; }
+
+        [JsonPropertyName("recommendedEpochsBatch")]
+        public int? RecommendedEpochsBatch { get; set; }
+
+        [JsonPropertyName("recommendedEpochsSequentialBig")]
+        public int? RecommendedEpochsSequentialBig { get; set; }
+
+        [JsonPropertyName("recommendedEpochsSequentialSmall")]
+        public int? RecommendedEpochsSequentialSmall { get; set; }
     }
 }

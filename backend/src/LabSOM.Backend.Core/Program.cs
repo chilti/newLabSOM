@@ -172,6 +172,7 @@ app.MapPost("/api/preprocess/bibliometrics", async (HttpRequest req, PreprocessS
         Min_Cooccurrence = int.TryParse(req.Form["minCooc"], out int mc) ? mc : 2,
         Only_Major_Mesh = bool.TryParse(req.Form["onlyMajor"], out bool om) ? om : false,
         Temporal = bool.TryParse(req.Form["temporal"], out bool temp) ? temp : false,
+        Temporal_Window = int.TryParse(req.Form["temporalWindow"], out int tw) ? tw : 1,
         Extraction_Source = req.Form["extractionSource"].FirstOrDefault() ?? "keywords",
         Counting_Method = req.Form["countingMethod"].FirstOrDefault() ?? "full",
         Relevance_Ratio = double.TryParse(req.Form["relevanceRatio"], out double rr) ? rr : 0.60
@@ -278,6 +279,21 @@ app.MapPost("/api/som/train", async (SOMTrainingRequest request, SOMEngineServic
     }
     
     var result = await engine.TrainAsync(request);
+    if (!result.Success)
+    {
+        return Results.Json(result, statusCode: 500);
+    }
+    return Results.Ok(result);
+});
+
+app.MapPost("/api/som/train-longitudinal", async (LongitudinalSOMTrainingRequest request, SOMEngineService engine) =>
+{
+    if (request.PeriodsData == null || request.PeriodsData.Count == 0)
+    {
+        return Results.BadRequest(new { success = false, error = "Periods data is empty or invalid." });
+    }
+    
+    var result = await engine.TrainLongitudinalAsync(request);
     if (!result.Success)
     {
         return Results.Json(result, statusCode: 500);

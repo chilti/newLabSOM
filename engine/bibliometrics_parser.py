@@ -25,6 +25,39 @@ from vos_parsers import (
 # FILE-FORMAT DETECTION & PRE-PROCESSING
 # =============================================================================
 
+def _generate_time_windows(years_list, window_size=1):
+    """
+    Given a list of integer years and a window size in years (e.g. 1, 2, 3, 5),
+    returns a list of tuples: (label, start_year, end_year).
+    For window_size=1: ("2015", 2015, 2015), ("2016", 2016, 2016), ...
+    For window_size=5: ("2010-2014", 2010, 2014), ("2015-2019", 2015, 2019), ...
+    """
+    clean_years = sorted(list({int(str(y)[:4]) for y in years_list if str(y)[:4].isdigit()}))
+    if not clean_years:
+        return []
+    
+    try:
+        w = int(window_size)
+    except Exception:
+        w = 1
+        
+    if w <= 1:
+        return [(str(y), y, y) for y in clean_years]
+        
+    min_y = clean_years[0]
+    max_y = clean_years[-1]
+    
+    windows = []
+    cur_start = min_y
+    while cur_start <= max_y:
+        cur_end = min(cur_start + w - 1, max_y)
+        label = f"{cur_start}-{cur_end}" if cur_start != cur_end else str(cur_start)
+        if any(cur_start <= y <= cur_end for y in clean_years):
+            windows.append((label, cur_start, cur_end))
+        cur_start += w
+        
+    return windows
+
 def _is_scopus_csv(filepath):
     """
     Detect Scopus CSV exports (UTF-8 BOM + 'Authors'/'Title' in header).
@@ -60,7 +93,8 @@ _SCOPUS_TAG_MAP = {
 def _process_scopus_csv(filepath, network_type, custom_tag,
                         max_terms, min_cooccurrence, temporal,
                         extraction_source="keywords", counting_method="full",
-                        thesaurus_filepath=None, relevance_ratio=0.60):
+                        thesaurus_filepath=None, relevance_ratio=0.60,
+                        temporal_window=1):
     """
     Full pipeline for Scopus CSV files using pandas.
     Supports all VOSviewer network types, units of analysis,
@@ -242,7 +276,8 @@ def _process_scopus_csv(filepath, network_type, custom_tag,
         record_title_getter=lambda r: r.get('Title', 'Unknown'),
         record_year_getter=lambda r: r.get('Year', 'N/A'),
         doc_count=len(records),
-        counting_method=counting_method
+        counting_method=counting_method,
+        temporal_window=temporal_window
     )
 
 
@@ -454,10 +489,12 @@ def _build_vosviewer_json_from_graph(graph, term_counts=None, records=None, term
 def _finalize_network(global_graph, records, network_type, custom_tag,
                        max_terms, min_cooccurrence, temporal,
                        term_getter_for_matrix, record_title_getter,
-                       record_year_getter, doc_count, counting_method="full"):
+                       record_year_getter, doc_count, counting_method="full",
+                       temporal_window=1):
     """
     Shared post-processing: filter top nodes, build JSON + CSV matrices.
-    Used by both the Scopus CSV and RIS pipelines.
+    Used by Scopus CSV, RIS, Dimensions, OpenAlex and Lens pipelines.
+    Supports subperiod time windows (e.g. 5-year chunks) for longitudinal analysis.
     """
     base_type = network_type.split(':')[0]
     tag1_wos, tag2_wos = 'AU', 'DE'
@@ -543,16 +580,22 @@ def _finalize_network(global_graph, records, network_type, custom_tag,
                                    index=row_labels)
             frequency_csv = df_freq.to_csv()
 
-    # ── Temporal networks ─────────────────────────────────────────────────────
+    # ── Temporal / Longitudinal Subperiod networks ───────────────────────────
     networks_by_year = {}
+    cooccurrence_matrices_by_period = {}
     if temporal and term_getter_for_matrix:
         years = sorted({
-            str(record_year_getter(r)) for r in records
-            if str(record_year_getter(r)).isdigit()
+            int(str(record_year_getter(r))[:4]) for r in records
+            if str(record_year_getter(r))[:4].isdigit()
         })
+        time_windows = _generate_time_windows(years, temporal_window)
         temporal_matrix_data, temporal_row_labels = [], []
-        for y in years:
-            recs_y = [r for r in records if str(record_year_getter(r)) == y]
+        
+        for label, start_yr, end_yr in time_windows:
+            recs_y = [
+                r for r in records
+                if str(record_year_getter(r))[:4].isdigit() and start_yr <= int(str(record_year_getter(r))[:4]) <= end_yr
+            ]
             if not recs_y:
                 continue
             y_graph = _build_cooccurrence_graph_from_records(recs_y, term_getter_for_matrix, counting_method=counting_method)
@@ -577,7 +620,7 @@ def _finalize_network(global_graph, records, network_type, custom_tag,
                     w = n1_f if n1 == n2 else y_graph.get_edge_data(n1, n2, default={}).get('weight', 0)
                     row.append(w); y_df.at[n1, n2] = w
                 temporal_matrix_data.append(row)
-                temporal_row_labels.append(f"{y}_{n1}")
+                temporal_row_labels.append(f"{label}_{n1}")
             y_vos_json = _build_vosviewer_json_from_graph(
                 y_graph,
                 term_counts={str(n): y_graph.nodes[n].get('count', 1) for n in y_graph.nodes},
@@ -585,11 +628,18 @@ def _finalize_network(global_graph, records, network_type, custom_tag,
                 term_getter=term_getter_for_matrix,
                 record_year_getter=record_year_getter
             )
-            networks_by_year[y] = {
+            networks_by_year[label] = {
                 "nodes": y_nodes,
                 "edges": y_edges,
                 "cooccurrence_csv": y_df.to_csv(),
                 "vosviewer_json": y_vos_json
+            }
+            cooccurrence_matrices_by_period[label] = {
+                "data": y_df.values.tolist(),
+                "labels": [str(n) for n in sorted_top_nodes],
+                "doc_count": len(recs_y),
+                "start_year": start_yr,
+                "end_year": end_yr
             }
 
         if temporal_matrix_data:
@@ -615,9 +665,11 @@ def _finalize_network(global_graph, records, network_type, custom_tag,
         "term_counts": term_counts,
         "frequency_csv": frequency_csv,
         "cooccurrence_csv": cooccurrence_csv,
+        "temporal_window": temporal_window
     }
     if temporal:
         result["networks_by_year"] = networks_by_year
+        result["cooccurrence_matrices_by_period"] = cooccurrence_matrices_by_period
     return result
 
 
@@ -735,7 +787,8 @@ def _process_record_list(
     extraction_source="keywords",
     counting_method="full",
     thesaurus_filepath=None,
-    relevance_ratio=0.60
+    relevance_ratio=0.60,
+    temporal_window=1
 ):
     """
     Generic processing pipeline for any list of record dictionaries
@@ -846,19 +899,23 @@ def _process_record_list(
         record_title_getter=lambda r: r.get('title', 'Unknown'),
         record_year_getter=lambda r: r.get('year', 'N/A'),
         doc_count=len(records),
+        counting_method=counting_method,
+        temporal_window=temporal_window
     )
 
 
 def _process_ris_file(filepath, network_type, custom_tag,
                        max_terms, min_cooccurrence, temporal,
                        extraction_source="keywords", counting_method="full",
-                       thesaurus_filepath=None, relevance_ratio=0.60):
+                       thesaurus_filepath=None, relevance_ratio=0.60,
+                       temporal_window=1):
     """Full pipeline for RIS files."""
     records = _parse_ris_records(filepath)
     return _process_record_list(
         records, network_type, custom_tag, max_terms, min_cooccurrence, temporal,
         extraction_source=extraction_source, counting_method=counting_method,
-        thesaurus_filepath=thesaurus_filepath, relevance_ratio=relevance_ratio
+        thesaurus_filepath=thesaurus_filepath, relevance_ratio=relevance_ratio,
+        temporal_window=temporal_window
     )
 
 
@@ -876,7 +933,8 @@ def read_and_generate_bibliometrics(
     extraction_source="keywords",
     counting_method="full",
     thesaurus_filepath=None,
-    relevance_ratio=0.60
+    relevance_ratio=0.60,
+    temporal_window=1
 ):
     """
     Reads a bibliometrics file and generates a co-occurrence / citation network.
@@ -902,7 +960,8 @@ def read_and_generate_bibliometrics(
         return _process_record_list(
             records, network_type, custom_tag, max_terms, min_cooccurrence, temporal,
             extraction_source=extraction_source, counting_method=counting_method,
-            thesaurus_filepath=thesaurus_filepath, relevance_ratio=relevance_ratio
+            thesaurus_filepath=thesaurus_filepath, relevance_ratio=relevance_ratio,
+            temporal_window=temporal_window
         )
 
     # ── Route Lens.org CSV exports ────────────────────────────────────────────
@@ -911,7 +970,8 @@ def read_and_generate_bibliometrics(
         return _process_record_list(
             records, network_type, custom_tag, max_terms, min_cooccurrence, temporal,
             extraction_source=extraction_source, counting_method=counting_method,
-            thesaurus_filepath=thesaurus_filepath, relevance_ratio=relevance_ratio
+            thesaurus_filepath=thesaurus_filepath, relevance_ratio=relevance_ratio,
+            temporal_window=temporal_window
         )
 
     # ── Route OpenAlex CSV exports ────────────────────────────────────────────
@@ -920,7 +980,8 @@ def read_and_generate_bibliometrics(
         return _process_record_list(
             records, network_type, custom_tag, max_terms, min_cooccurrence, temporal,
             extraction_source=extraction_source, counting_method=counting_method,
-            thesaurus_filepath=thesaurus_filepath, relevance_ratio=relevance_ratio
+            thesaurus_filepath=thesaurus_filepath, relevance_ratio=relevance_ratio,
+            temporal_window=temporal_window
         )
 
     # ── Route RIS files to the dedicated parser ───────────────────────────────
@@ -928,7 +989,8 @@ def read_and_generate_bibliometrics(
         return _process_ris_file(
             filepath, network_type, custom_tag, max_terms, min_cooccurrence, temporal,
             extraction_source=extraction_source, counting_method=counting_method,
-            thesaurus_filepath=thesaurus_filepath, relevance_ratio=relevance_ratio
+            thesaurus_filepath=thesaurus_filepath, relevance_ratio=relevance_ratio,
+            temporal_window=temporal_window
         )
 
     # ── Route Scopus CSV to the pandas-based parser ───────────────────────────
@@ -936,14 +998,16 @@ def read_and_generate_bibliometrics(
         return _process_scopus_csv(
             filepath, network_type, custom_tag, max_terms, min_cooccurrence, temporal,
             extraction_source=extraction_source, counting_method=counting_method,
-            thesaurus_filepath=thesaurus_filepath, relevance_ratio=relevance_ratio
+            thesaurus_filepath=thesaurus_filepath, relevance_ratio=relevance_ratio,
+            temporal_window=temporal_window
         )
 
     # ── All other formats go through MetaKnowledge ────────────────────────────
     return _metaknowledge_process(
         filepath, network_type, custom_tag, max_terms, min_cooccurrence, temporal,
         extraction_source=extraction_source, counting_method=counting_method,
-        thesaurus_filepath=thesaurus_filepath, relevance_ratio=relevance_ratio
+        thesaurus_filepath=thesaurus_filepath, relevance_ratio=relevance_ratio,
+        temporal_window=temporal_window
     )
 
 
@@ -1099,8 +1163,9 @@ def _build_graph_for_rc(RC_subset, network_type, custom_tag, counting_method="fu
 def _metaknowledge_process(filepath, network_type, custom_tag,
                             max_terms, min_cooccurrence, temporal,
                             extraction_source="keywords", counting_method="full",
-                            thesaurus_filepath=None, relevance_ratio=0.60):
-    """MetaKnowledge-based processing supporting all VOSviewer network types."""
+                            thesaurus_filepath=None, relevance_ratio=0.60,
+                            temporal_window=1):
+    """MetaKnowledge-based processing supporting all VOSviewer network types and subperiods."""
 
     # 1. Pre-clean the raw text file if date tags are requested
     import re
@@ -1293,6 +1358,7 @@ def _metaknowledge_process(filepath, network_type, custom_tag,
 
     # 7. Temporal networks
     networks_by_year = {}
+    cooccurrence_matrices_by_period = {}
     if temporal:
         years = set()
         for r in RC:
@@ -1308,16 +1374,17 @@ def _metaknowledge_process(filepath, network_type, custom_tag,
                 except Exception:
                     pass
         years = sorted(years)
+        time_windows = _generate_time_windows(years, temporal_window)
 
         temporal_matrix_data, temporal_row_labels = [], []
-        for y in years:
+        for label, start_yr, end_yr in time_windows:
             try:
-                RC_year = RC.yearSplit(y, y)
-                if len(RC_year) == 0:
+                RC_window = RC.yearSplit(start_yr, end_yr)
+                if len(RC_window) == 0:
                     continue
 
                 y_graph = _build_graph_for_rc(
-                    RC_year, network_type, custom_tag,
+                    RC_window, network_type, custom_tag,
                     counting_method=counting_method,
                     thesaurus=thesaurus,
                     extraction_source=extraction_source,
@@ -1341,7 +1408,7 @@ def _metaknowledge_process(filepath, network_type, custom_tag,
                             row.append(w)
                             y_df.at[n1, n2] = w
                         temporal_matrix_data.append(row)
-                        temporal_row_labels.append(f"{y}_{n1}")
+                        temporal_row_labels.append(f"{label}_{n1}")
                     y_cooc_csv = y_df.to_csv()
                 else:
                     y_df = pd.DataFrame(0, index=sorted_top_nodes, columns=sorted_top_nodes, dtype=float)
@@ -1357,7 +1424,7 @@ def _metaknowledge_process(filepath, network_type, custom_tag,
                                 row.append(w)
                                 y_df.at[n1, n2] = w
                         temporal_matrix_data.append(row)
-                        temporal_row_labels.append(f"{y}_{n1}")
+                        temporal_row_labels.append(f"{label}_{n1}")
                     y_cooc_csv = y_df.to_csv()
 
                 def _mk_term_getter_year(r):
@@ -1375,16 +1442,23 @@ def _metaknowledge_process(filepath, network_type, custom_tag,
                 y_vos_json = _build_vosviewer_json_from_graph(
                     y_graph,
                     term_counts={str(n): y_graph.nodes[n].get('count', 1) for n in y_graph.nodes},
-                    records=RC_year,
+                    records=RC_window,
                     term_getter=_mk_term_getter_year,
-                    record_year_getter=lambda r: str(y)
+                    record_year_getter=lambda r: str(label)
                 )
 
-                networks_by_year[str(y)] = {
+                networks_by_year[str(label)] = {
                     "nodes": y_nodes,
                     "edges": y_edges,
                     "cooccurrence_csv": y_cooc_csv,
                     "vosviewer_json": y_vos_json
+                }
+                cooccurrence_matrices_by_period[str(label)] = {
+                    "data": y_df.values.tolist(),
+                    "labels": [str(n) for n in matrix_cols],
+                    "doc_count": len(RC_window),
+                    "start_year": start_yr,
+                    "end_year": end_yr
                 }
             except Exception:
                 pass
@@ -1441,9 +1515,11 @@ def _metaknowledge_process(filepath, network_type, custom_tag,
         "term_counts": term_counts,
         "frequency_csv": frequency_csv,
         "cooccurrence_csv": cooccurrence_csv,
+        "temporal_window": temporal_window
     }
     if temporal:
         result_dict["networks_by_year"] = networks_by_year
+        result_dict["cooccurrence_matrices_by_period"] = cooccurrence_matrices_by_period
     return result_dict
 
 
@@ -1469,6 +1545,7 @@ if __name__ == "__main__":
         counting_method   = payload.get("counting_method", "full")
         thesaurus_filepath = payload.get("thesaurus_filepath", None)
         relevance_ratio   = payload.get("relevance_ratio", 0.60)
+        temporal_window   = int(payload.get("temporal_window", payload.get("temporalWindow", 1)))
 
         result = read_and_generate_bibliometrics(
             filepath,
@@ -1480,7 +1557,8 @@ if __name__ == "__main__":
             extraction_source=extraction_source,
             counting_method=counting_method,
             thesaurus_filepath=thesaurus_filepath,
-            relevance_ratio=relevance_ratio
+            relevance_ratio=relevance_ratio,
+            temporal_window=temporal_window
         )
         print(json.dumps(result))
     except Exception as e:
