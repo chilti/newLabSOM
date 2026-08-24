@@ -25,6 +25,24 @@ def is_dimensions_csv(filepath: str) -> bool:
     return False
 
 
+def is_openalex_csv(filepath: str) -> bool:
+    """Checks if a CSV file is an export from OpenAlex."""
+    if not filepath.lower().endswith('.csv'):
+        return False
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+            first_line = f.readline().lower()
+            if 'work id' in first_line or 'concept ids' in first_line or 'keyword ids' in first_line:
+                return True
+            if 'open access' in first_line and 'concept' in first_line and 'author' in first_line:
+                return True
+            if 'fwci' in first_line and 'topic' in first_line:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def is_lens_csv(filepath: str) -> bool:
     """Checks if a CSV file is an export from Lens.org."""
     if not filepath.lower().endswith('.csv'):
@@ -150,6 +168,121 @@ def parse_lens_csv(filepath: str) -> List[Dict[str, Any]]:
                 'keywords': keywords,
                 'source': row.get('Source Title') or row.get('Journal') or '',
                 'doi': row.get('DOI') or ''
+            }
+            records.append(rec)
+    return records
+
+
+def parse_openalex_csv(filepath: str) -> List[Dict[str, Any]]:
+    """Parses an OpenAlex CSV export into standardized records with all available fields."""
+    records = []
+    with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            title = (row.get('Title') or '').strip()
+            if not title:
+                continue
+
+            abstract = (row.get('Abstract') or '').strip()
+            if abstract == '.':
+                abstract = ''
+
+            year = (row.get('Year') or '').strip()
+            if not year and row.get('Date'):
+                date_val = str(row.get('Date')).strip()
+                if len(date_val) >= 4:
+                    year = date_val[:4]
+
+            citations = 0
+            cit_raw = row.get('Citation count') or row.get('Cited by') or '0'
+            try:
+                citations = float(str(cit_raw).replace(',', ''))
+            except Exception:
+                citations = 0
+
+            # Authors (pipe-separated)
+            authors_raw = row.get('Author') or ''
+            authors = [a.strip() for a in str(authors_raw).split('|') if a.strip() and a.strip().lower() != 'nan']
+
+            # Keywords & Concepts (pipe-separated)
+            kw_raw = row.get('Keyword') or ''
+            author_keywords = [k.strip() for k in str(kw_raw).split('|') if k.strip() and k.strip().lower() != 'nan']
+
+            concepts_raw = row.get('Concept') or ''
+            concepts = [c.strip() for c in str(concepts_raw).split('|') if c.strip() and c.strip().lower() != 'nan']
+
+            # Combined keywords
+            keywords = list(dict.fromkeys(author_keywords + concepts))
+
+            # Topics / Fields / Subfields
+            topics = []
+            for t_col in ['Topic', 'Subfield', 'Field', 'Domain']:
+                t_val = row.get(t_col) or ''
+                if t_val and str(t_val).strip().lower() != 'nan':
+                    topics.extend([t.strip() for t in str(t_val).split('|') if t.strip()])
+            topics = list(dict.fromkeys(topics))
+
+            # Institutions / Organizations
+            inst_raw = row.get('Institution') or ''
+            organizations = [i.strip() for i in str(inst_raw).split('|') if i.strip() and i.strip().lower() != 'nan']
+
+            # Countries
+            country_raw = row.get('Country') or ''
+            countries = [c.strip() for c in str(country_raw).split('|') if c.strip() and c.strip().lower() != 'nan']
+
+            # Continents
+            continent_raw = row.get('Continent') or ''
+            continents = [c.strip() for c in str(continent_raw).split('|') if c.strip() and c.strip().lower() != 'nan']
+
+            # Funders
+            funder_raw = row.get('Funder') or ''
+            funders = [f.strip() for f in str(funder_raw).split('|') if f.strip() and f.strip().lower() != 'nan']
+
+            # Source / Journal
+            source = (row.get('Source') or row.get('Any location source') or '').strip()
+            if source.lower() == 'nan':
+                source = ''
+
+            # DOI
+            doi = (row.get('DOI') or '').strip()
+            if doi.lower() == 'nan':
+                doi = ''
+
+            rec = {
+                'title': title,
+                'abstract': abstract,
+                'year': year,
+                'citations': citations,
+                'authors': authors,
+                'keywords': keywords,
+                'author_keywords': author_keywords,
+                'concepts': concepts,
+                'topics': topics,
+                'organizations': organizations,
+                'countries': countries,
+                'continents': continents,
+                'funders': funders,
+                'source': source,
+                'doi': doi,
+                'work_id': (row.get('Work ID') or '').strip(),
+                'open_access': (row.get('Open access') or '').strip(),
+                'fwci': (row.get('FWCI') or '').strip(),
+                # Metaknowledge / WOS tags compatibility
+                'TI': title,
+                'AU': authors,
+                'PY': year,
+                'TC': citations,
+                'DE': author_keywords,
+                'ID': concepts,
+                'SO': source,
+                'C1': organizations,
+                'CU': countries,
+                'FU': funders,
+                'AB': abstract,
+                'DI': doi,
+                'Topic': topics,
+                'Concept': concepts,
+                'Continent': continents
             }
             records.append(rec)
     return records

@@ -17,6 +17,12 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 # For dotenv
 from dotenv import load_dotenv
 
+from vos_parsers import (
+    is_openalex_csv, parse_openalex_csv,
+    is_dimensions_csv, parse_dimensions_csv,
+    is_lens_csv, parse_lens_csv
+)
+
 # Try to import GPU UMAP
 try:
     import cuml
@@ -97,6 +103,71 @@ def handle_parse(params):
     if not filepath or not os.path.exists(filepath):
         return {"success": False, "error": f"File not found: '{filepath}'"}
         
+    # Check specialized parsers (OpenAlex, Dimensions, Lens)
+    raw_recs = None
+    if is_openalex_csv(filepath):
+        raw_recs = parse_openalex_csv(filepath)
+    elif is_dimensions_csv(filepath):
+        raw_recs = parse_dimensions_csv(filepath)
+    elif is_lens_csv(filepath):
+        raw_recs = parse_lens_csv(filepath)
+
+    if raw_recs is not None:
+        if len(raw_recs) == 0:
+            return {"success": False, "error": "No records found in the file."}
+        records = []
+        for idx, r in enumerate(raw_recs):
+            doi = r.get('doi') or r.get('work_id') or f"ID_{idx+1}"
+            title = clean_text(r.get('title') or '')
+            abstract = clean_text(r.get('abstract') or '')
+            keywords = [clean_text(k) for k in r.get('keywords', []) if k]
+            
+            extras = {}
+            for field in extra_fields:
+                val = r.get(field)
+                if val:
+                    if isinstance(val, list):
+                        if field == 'AU':
+                            val = ", ".join(str(v) for v in val)
+                        else:
+                            val = " | ".join(str(v) for v in val)
+                    extras[field] = clean_text(str(val))
+                    
+            if 'AU' in extra_fields and 'AU' not in extras:
+                au = r.get('authors')
+                if au:
+                    if isinstance(au, list): au = ", ".join(str(v) for v in au)
+                    extras['AU'] = clean_text(str(au))
+                    
+            if 'PY' in extra_fields and 'PY' not in extras:
+                py = r.get('year')
+                if py:
+                    extras['PY'] = clean_text(str(py))[:4]
+                    
+            if 'SO' in extra_fields and 'SO' not in extras:
+                so = r.get('source')
+                if so:
+                    extras['SO'] = clean_text(str(so))
+                    
+            parts = []
+            if extract_title and title: parts.append(f"Title: {title}")
+            if extract_abstract and abstract: parts.append(f"Abstract: {abstract}")
+            if extract_keywords and keywords: parts.append(f"Keywords: {', '.join(keywords)}")
+            if 'SO' in extras and extras['SO']: parts.append(f"Journal: {extras['SO']}")
+            
+            concatenated_text = " | ".join(parts) if parts else "Unknown document content"
+            
+            records.append({
+                "id": doi,
+                "doi": doi,
+                "title": title,
+                "abstract": abstract,
+                "keywords": keywords,
+                "concatenated_text": concatenated_text,
+                "extras": extras
+            })
+        return {"success": True, "records": records}
+
     try:
         RC = mk.RecordCollection(filepath)
     except Exception as e:

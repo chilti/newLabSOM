@@ -106,6 +106,13 @@ export interface SomRun {
   entityColorOverrides?: Record<string, string>;
 }
 
+export interface ComponentScaleConfig {
+  source: 'raw' | 'weights' | 'custom';
+  customMin?: number;
+  customMid?: number;
+  customMax?: number;
+}
+
 interface SOMState {
   // Config & Status
   config: SOMConfig;
@@ -163,6 +170,8 @@ interface SOMState {
   compNames: string[];
   
   // Preprocessed Bibliometrics
+  sharedBibFile: File | null;
+  setSharedBibFile: (file: File | null) => void;
   documentCount: number;
   termCounts: Record<string, number>;
   network: { nodes: any[]; edges: any[] } | null;
@@ -195,6 +204,10 @@ interface SOMState {
   clusterLabels: Record<number, string>;
   showClusterLabels: boolean;
 
+  // Component Map Chromatic Scale Customizations
+  componentScaleConfigs: Record<number, ComponentScaleConfig>;
+  globalScaleSource: 'raw' | 'weights';
+
   setShowLabels: (show: boolean) => void;
   setLabelSearchQuery: (query: string) => void;
   toggleLabelVisibility: (label: string) => void;
@@ -207,6 +220,9 @@ interface SOMState {
   setClusterLabel: (clusterId: number, name: string) => void;
   setShowClusterLabels: (show: boolean) => void;
   resetLabelFilters: () => void;
+  setComponentScaleConfig: (compIdx: number, config: Partial<ComponentScaleConfig>) => void;
+  setGlobalScaleSource: (source: 'raw' | 'weights') => void;
+  resetComponentScaleConfigs: () => void;
   
   // PathSOM (Trajectory) State
   activeTrajectories: Set<string>;
@@ -260,9 +276,28 @@ interface SOMState {
   incitesIsUploading: boolean;
   incitesBaseline: any | null;
   incitesSelectedBaselineSource: string | null;
+  incitesLimitTop50: boolean;
+  incitesFilterIndicator: string;
+  incitesFilterMinValue: number | string;
+  incitesIsFilterActive: boolean;
+  incitesIsFilterModalOpen: boolean;
   cloudProjectId: string | null;
   cloudProjectTitle: string | null;
-  setIncitesState: (state: Partial<{ incitesUnitNames: string[] | null, incitesUnitCache: Record<string, any>, incitesLlmCache: Record<string, string>, incitesActiveUnit: string | null, incitesSidebarTab: 'profiles' | 'temporal', incitesIsUploading: boolean, incitesBaseline: any | null, incitesSelectedBaselineSource: string | null }>) => void;
+  setIncitesState: (state: Partial<{
+    incitesUnitNames: string[] | null,
+    incitesUnitCache: Record<string, any>,
+    incitesLlmCache: Record<string, string>,
+    incitesActiveUnit: string | null,
+    incitesSidebarTab: 'profiles' | 'temporal',
+    incitesIsUploading: boolean,
+    incitesBaseline: any | null,
+    incitesSelectedBaselineSource: string | null,
+    incitesLimitTop50: boolean,
+    incitesFilterIndicator: string,
+    incitesFilterMinValue: number | string,
+    incitesIsFilterActive: boolean,
+    incitesIsFilterModalOpen: boolean
+  }>) => void;
   uploadInCitesFiles: (formData: FormData) => Promise<void>;
   
   // Setters & Actions
@@ -466,6 +501,8 @@ export const useSomStore = create<SOMState>((set, get) => ({
   labels: [],
   compNames: [],
   
+  sharedBibFile: null,
+  setSharedBibFile: (file) => set({ sharedBibFile: file }),
   documentCount: 0,
   termCounts: {},
   network: null,
@@ -519,6 +556,11 @@ export const useSomStore = create<SOMState>((set, get) => ({
   incitesIsUploading: false,
   incitesBaseline: null,
   incitesSelectedBaselineSource: null,
+  incitesLimitTop50: true,
+  incitesFilterIndicator: '',
+  incitesFilterMinValue: '',
+  incitesIsFilterActive: false,
+  incitesIsFilterModalOpen: false,
   setIncitesState: (newState) => set((state) => ({ ...state, ...newState })),
   uploadInCitesFiles: async (formData: FormData) => {
     set({
@@ -765,6 +807,21 @@ export const useSomStore = create<SOMState>((set, get) => ({
     showClusterLabels: true,
     showLabelsOnComponents: false
   }),
+
+  // Component Map Chromatic Scale Customizations
+  componentScaleConfigs: {},
+  globalScaleSource: 'raw',
+  setComponentScaleConfig: (compIdx, config) => set((state) => ({
+    componentScaleConfigs: {
+      ...state.componentScaleConfigs,
+      [compIdx]: {
+        ...(state.componentScaleConfigs[compIdx] || { source: state.globalScaleSource }),
+        ...config
+      }
+    }
+  })),
+  setGlobalScaleSource: (source) => set({ globalScaleSource: source }),
+  resetComponentScaleConfigs: () => set({ componentScaleConfigs: {} }),
 
   // PathSOM (Trajectory) State
   activeTrajectories: new Set<string>(),

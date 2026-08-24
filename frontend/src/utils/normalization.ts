@@ -311,3 +311,27 @@ export const applyNormalizationToMatrix = (matrix: number[][], type: Normalizati
     default: return { normalizedMatrix: cloneMatrix(matrix), scalerInfo: { type: 'div_max', params: {} } };
   }
 };
+
+export const denormalizeValue = (normVal: number, featureIdx: number, normInfo: NormalizationInfo | null): number => {
+  if (!normInfo || !normInfo.type) return normVal;
+  const { type, params } = normInfo;
+
+  if (type === 'div_max' && params?.maxValues && params.maxValues[featureIdx] !== undefined) {
+    return normVal * params.maxValues[featureIdx];
+  }
+  if (type === 'min_max' && params?.minValues && params?.ranges && params.minValues[featureIdx] !== undefined) {
+    return normVal * params.ranges[featureIdx] + params.minValues[featureIdx];
+  }
+  if (type === 'z_score' && params?.means && params?.stdDevs && params.means[featureIdx] !== undefined) {
+    return normVal * params.stdDevs[featureIdx] + params.means[featureIdx];
+  }
+  if (type === 'bipartite_col' && params?.colDegrees && params.colDegrees[featureIdx] !== undefined) {
+    return normVal * params.colDegrees[featureIdx];
+  }
+  return normVal;
+};
+
+export const denormalizeVector = (normVector: number[], normInfo: NormalizationInfo | null): number[] => {
+  if (!normInfo || !normInfo.type) return [...normVector];
+  return normVector.map((val, idx) => denormalizeValue(val, idx, normInfo));
+};

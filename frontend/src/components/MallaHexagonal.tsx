@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import chroma from 'chroma-js';
 import { line, curveCatmullRom } from 'd3-shape';
 import { useSomStore } from '../store/somStore';
-import { RefreshCw, ZoomIn, ZoomOut, Tags, Download, Layers } from 'lucide-react';
+import { RefreshCw, ZoomIn, ZoomOut, Tags, Download, Layers, Sliders } from 'lucide-react';
+import { denormalizeValue } from '../utils/normalization';
 
 export interface Trajectory {
   name: string;
@@ -36,8 +37,14 @@ export const MallaHexagonal: React.FC<MallaHexagonalProps> = ({
   const { 
     result, 
     config: somConfig,
+    dataMatrix,
     originalDataMatrix,
     labels,
+    compNames,
+    normalizationInfo,
+    componentScaleConfigs,
+    globalScaleSource,
+    setComponentScaleConfig,
     // Label Filters Zustand states & actions
     showLabels,
     labelSearchQuery,
@@ -60,6 +67,8 @@ export const MallaHexagonal: React.FC<MallaHexagonalProps> = ({
     setShowClusterLabels,
     resetLabelFilters
   } = useSomStore();
+
+  const [isScaleModalOpen, setIsScaleModalOpen] = useState(false);
   
   // Calculate a scale factor that scales down dynamically for large grid sizes (e.g. 20x20)
   const baseScale = initialScale ?? 60;
@@ -155,16 +164,51 @@ export const MallaHexagonal: React.FC<MallaHexagonalProps> = ({
   const heightPx = gridHeight * scale;
   const viewboxStr = `${minX} ${minY} ${gridWidth} ${gridHeight}`;
 
-  // Calculate original data metrics for component map color bar
-  let compMin = 0;
-  let compMax = 0;
-  let compAvg = 0;
+  // 1. Raw Dataset metrics
+  let rawMin = 0, rawMax = 1, rawAvg = 0.5;
+  const baseMatrix = (originalDataMatrix && originalDataMatrix.length > 0) ? originalDataMatrix : dataMatrix;
+  if (baseMatrix && baseMatrix.length > 0 && selectedComponentIndex < baseMatrix[0].length) {
+    const colValues = baseMatrix.map(row => row[selectedComponentIndex]);
+    rawMin = Math.min(...colValues);
+    rawMax = Math.max(...colValues);
+    rawAvg = colValues.reduce((a, b) => a + b, 0) / colValues.length;
+  }
 
-  if (visualizationMode === 'component' && originalDataMatrix && originalDataMatrix.length > 0 && selectedComponentIndex < originalDataMatrix[0].length) {
-    const colValues = originalDataMatrix.map(row => row[selectedComponentIndex]);
-    compMin = Math.min(...colValues);
-    compMax = Math.max(...colValues);
-    compAvg = colValues.reduce((a, b) => a + b, 0) / colValues.length;
+  // 2. SOM Neuron Weights metrics (desnormalized)
+  let somMin = 0, somMax = 1, somAvg = 0.5;
+  if (result?.weights && result.weights.length > 0 && selectedComponentIndex < result.weights[0].length) {
+    const denormWeights = result.weights.map(w => denormalizeValue(w[selectedComponentIndex] ?? 0, selectedComponentIndex, normalizationInfo));
+    somMin = Math.min(...denormWeights);
+    somMax = Math.max(...denormWeights);
+    somAvg = denormWeights.reduce((a, b) => a + b, 0) / denormWeights.length;
+  }
+
+  // 3. Resolve active scale configuration
+  const currentScaleConfig = componentScaleConfigs[selectedComponentIndex] || { source: globalScaleSource };
+  const scaleSource = currentScaleConfig.source;
+
+  let compMin = rawMin;
+  let compMax = rawMax;
+  let compAvg = rawAvg;
+
+  if (scaleSource === 'weights') {
+    compMin = somMin;
+    compMax = somMax;
+    compAvg = somAvg;
+  } else if (scaleSource === 'custom') {
+    compMin = currentScaleConfig.customMin ?? rawMin;
+    compMax = currentScaleConfig.customMax ?? rawMax;
+    compAvg = currentScaleConfig.customMid ?? (centerReference ?? rawAvg);
+  }
+
+  const effectiveMin = compMin;
+  const effectiveMax = compMax === compMin ? compMin + 1e-6 : compMax;
+  let effectiveMid = currentScaleConfig.source === 'custom' && currentScaleConfig.customMid !== undefined
+    ? currentScaleConfig.customMid
+    : (centerReference ?? compAvg);
+
+  if (effectiveMid <= effectiveMin || effectiveMid >= effectiveMax) {
+    effectiveMid = (effectiveMin + effectiveMax) / 2.0;
   }
 
   // Extract all unique labels present in the trained result for selection list
@@ -209,24 +253,18 @@ export const MallaHexagonal: React.FC<MallaHexagonalProps> = ({
 
     // 2. Component Scale
     if (visualizationMode === 'component' && result.weights && result.weights.length > 0) {
-      const compWeights = result.weights.map(w => w[selectedComponentIndex]);
-      const minW = Math.min(...compWeights);
-      const maxW = Math.max(...compWeights);
-      
       if (colorScale === 'viridis') {
-        scales.compFn = chroma.scale(['#440154', '#3b528b', '#21918c', '#5ec962', '#fde725']).domain([minW, maxW]);
+        scales.compFn = chroma.scale(['#440154', '#3b528b', '#21918c', '#5ec962', '#fde725'])
+          .domain([effectiveMin, (effectiveMin + effectiveMid) / 2, effectiveMid, (effectiveMid + effectiveMax) / 2, effectiveMax]);
       } else if (colorScale === 'cividis') {
-        scales.compFn = chroma.scale(['#00204d', '#414d6b', '#7c7b78', '#b9ad71', '#ffea46']).domain([minW, maxW]);
+        scales.compFn = chroma.scale(['#00204d', '#414d6b', '#7c7b78', '#b9ad71', '#ffea46'])
+          .domain([effectiveMin, (effectiveMin + effectiveMid) / 2, effectiveMid, (effectiveMid + effectiveMax) / 2, effectiveMax]);
       } else {
-        let mid = centerReference ?? (minW + maxW) / 2.0;
-        if (mid <= minW || mid >= maxW) {
-          mid = (minW + maxW) / 2.0;
-        }
-        scales.compFn = chroma.scale(['#38a169', '#ecc94b', '#e53e3e']).domain([minW, mid, maxW]);
+        scales.compFn = chroma.scale(['#38a169', '#ecc94b', '#e53e3e']).domain([effectiveMin, effectiveMid, effectiveMax]);
       }
     }
     return scales;
-  }, [visualizationMode, result, selectedComponentIndex, colorScale, centerReference]);
+  }, [visualizationMode, result, selectedComponentIndex, colorScale, effectiveMin, effectiveMid, effectiveMax]);
 
   // Get color for a specific cell based on visualization mode
   const getCellColor = (neuronIdx: number): string => {
@@ -262,8 +300,10 @@ export const MallaHexagonal: React.FC<MallaHexagonalProps> = ({
       }
       
       case 'component': {
-        const val = weights[neuronIdx][selectedComponentIndex];
-        return colorScales.compFn ? colorScales.compFn(val).hex() : '#4a5568';
+        const rawW = weights[neuronIdx]?.[selectedComponentIndex] ?? 0;
+        const val = denormalizeValue(rawW, selectedComponentIndex, normalizationInfo);
+        const clampedVal = Math.max(effectiveMin, Math.min(effectiveMax, val));
+        return colorScales.compFn ? colorScales.compFn(clampedVal).hex() : '#4a5568';
       }
       
       default:
@@ -779,19 +819,33 @@ export const MallaHexagonal: React.FC<MallaHexagonalProps> = ({
         </div>
 
         {/* Color Bar Legend for Component Maps */}
-        {visualizationMode === 'component' && originalDataMatrix && originalDataMatrix.length > 0 && (
+        {visualizationMode === 'component' && (
           <div 
-            className="flex flex-col items-center justify-center px-3 py-4 border-l border-gray-800 bg-gray-900 bg-opacity-40"
-            style={{ flexShrink: 0, width: '65px', maxWidth: '65px' }}
+            className="flex flex-col items-center justify-between px-2 py-3 border-l border-gray-800 bg-gray-900/60 select-none group relative"
+            style={{ flexShrink: 0, width: '68px', maxWidth: '68px' }}
           >
-            <span className="text-[10px] font-bold text-gray-300 mb-2" title="Maximum Value (Original)">{compMax.toFixed(2)}</span>
+            {/* Settings trigger */}
+            <button
+              onClick={() => setIsScaleModalOpen(true)}
+              className="p-1 hover:bg-gray-800 text-gray-400 hover:text-indigo-400 rounded-md transition mb-1 cursor-pointer flex items-center space-x-1"
+              title="Adjust color range and reference scale"
+            >
+              <Sliders className="w-3 h-3" />
+              <span className="text-[8px] font-bold uppercase tracking-wider">{scaleSource === 'custom' ? 'Manual' : scaleSource === 'weights' ? 'SOM' : 'Raw'}</span>
+            </button>
+
+            <span className="text-[9px] font-bold text-gray-300 font-mono truncate max-w-[60px]" title={`Maximum: ${effectiveMax}`}>
+              {effectiveMax >= 1000 ? effectiveMax.toExponential(2) : effectiveMax.toFixed(2)}
+            </span>
             
             <div 
-              className="relative rounded-full shadow-inner my-1"
+              onClick={() => setIsScaleModalOpen(true)}
+              className="relative rounded-full shadow-inner my-1 cursor-pointer hover:ring-2 hover:ring-indigo-500/50 transition-all"
+              title="Click to adjust color range and reference value"
               style={{
                 width: '12px',
                 minWidth: '12px',
-                height: '120px',
+                height: '110px',
                 background: colorScale === 'standard'
                   ? 'linear-gradient(to bottom, #e53e3e, #ecc94b, #38a169)'
                   : colorScale === 'viridis'
@@ -799,28 +853,224 @@ export const MallaHexagonal: React.FC<MallaHexagonalProps> = ({
                     : 'linear-gradient(to bottom, #ffea46, #b9ad71, #7c7b78, #414d6b, #00204d)'
               }}
             >
-              {/* Avg indicator (line only) */}
+              {/* Mid / Average indicator line */}
               <div 
-                className="absolute bg-white z-10 rounded-full" 
+                className="absolute bg-white z-10 rounded-full shadow-md" 
                 style={{ 
                   width: '20px', 
                   height: '2px', 
                   left: '-4px', 
-                  top: `${Math.max(0, Math.min(100, 100 - ((compAvg - compMin) / (compMax - compMin || 1)) * 100))}%` 
+                  top: `${Math.max(0, Math.min(100, 100 - ((effectiveMid - effectiveMin) / (effectiveMax - effectiveMin || 1)) * 100))}%` 
                 }}
-                title={`Average: μ = ${compAvg.toFixed(2)}`}
-              ></div>
+                title={`Center / Reference Value: ${effectiveMid.toFixed(2)}`}
+              />
             </div>
             
-            <span className="text-[10px] font-bold text-gray-300 mt-2" title="Minimum Value (Original)">{compMin.toFixed(2)}</span>
+            <span className="text-[9px] font-bold text-gray-300 font-mono truncate max-w-[60px]" title={`Minimum: ${effectiveMin}`}>
+              {effectiveMin >= 1000 ? effectiveMin.toExponential(2) : effectiveMin.toFixed(2)}
+            </span>
             
-            <div className="mt-3 pt-2 border-t border-gray-700 w-full flex flex-col items-center" title="Average Value (Original)">
-              <span className="text-[7px] text-gray-500 font-bold uppercase tracking-wider mb-0.5">Media</span>
-              <span className="text-[8px] font-bold text-gray-300">μ={compAvg.toFixed(2)}</span>
-            </div>
+            <button
+              onClick={() => setIsScaleModalOpen(true)}
+              className="mt-2 pt-1 border-t border-gray-800 w-full flex flex-col items-center hover:bg-gray-800/60 rounded py-0.5 transition cursor-pointer" 
+              title={`Center / Reference: ${effectiveMid.toFixed(2)} (Click to configure)`}
+            >
+              <span className="text-[7px] text-gray-500 font-bold uppercase tracking-wider">{scaleSource === 'custom' ? 'Ref' : 'Mean'}</span>
+              <span className="text-[8px] font-bold text-indigo-300 font-mono truncate max-w-[60px]">
+                {effectiveMid.toFixed(2)}
+              </span>
+            </button>
           </div>
         )}
       </div>
+
+      {/* COMPONENT CHROMATIC SCALE & REFERENCE MODAL */}
+      {isScaleModalOpen && visualizationMode === 'component' && (
+        <div className="absolute inset-0 bg-gray-950/85 backdrop-blur-xs z-50 flex items-center justify-center p-4 transition-all">
+          <div className="bg-gray-900 border border-gray-800 w-full max-w-sm rounded-2xl p-5 shadow-2xl flex flex-col space-y-4">
+            <div className="flex items-center justify-between border-b border-gray-800 pb-3">
+              <div className="flex items-center space-x-2">
+                <Sliders className="w-4 h-4 text-indigo-400" />
+                <h3 className="text-xs font-black uppercase text-gray-200 tracking-wider">
+                  Chromatic Scale Range {compNames && compNames[selectedComponentIndex] ? `(${compNames[selectedComponentIndex]})` : `#${selectedComponentIndex + 1}`}
+                </h3>
+              </div>
+              <button 
+                onClick={() => setIsScaleModalOpen(false)}
+                className="text-xs text-gray-500 hover:text-gray-300 font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Source Selection Tabs */}
+            <div className="space-y-1.5">
+              <label className="block text-[10px] font-bold uppercase text-gray-400 tracking-wider">
+                Calculation Source:
+              </label>
+              <div className="grid grid-cols-3 gap-1.5 p-1 bg-gray-950 rounded-xl border border-gray-800">
+                <button
+                  type="button"
+                  onClick={() => setComponentScaleConfig(selectedComponentIndex, { source: 'raw' })}
+                  className={`py-1.5 px-2 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+                    scaleSource === 'raw' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-gray-200'
+                  }`}
+                >
+                  Raw Data
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setComponentScaleConfig(selectedComponentIndex, { source: 'weights' })}
+                  className={`py-1.5 px-2 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+                    scaleSource === 'weights' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-gray-200'
+                  }`}
+                >
+                  SOM Weights
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setComponentScaleConfig(selectedComponentIndex, { 
+                    source: 'custom',
+                    customMin: currentScaleConfig.customMin ?? compMin,
+                    customMid: currentScaleConfig.customMid ?? compAvg,
+                    customMax: currentScaleConfig.customMax ?? compMax
+                  })}
+                  className={`py-1.5 px-2 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+                    scaleSource === 'custom' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-gray-200'
+                  }`}
+                >
+                  Custom Range
+                </button>
+              </div>
+            </div>
+
+            {/* Scale Presets and Manual Controls */}
+            {scaleSource === 'custom' ? (
+              <div className="space-y-3 bg-gray-950/70 p-3 rounded-xl border border-gray-800">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase text-indigo-400">Range Values:</span>
+                  <span className="text-[9px] text-gray-500">Manual adjustment</span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[9px] text-gray-400 mb-1 font-semibold">Minimum</label>
+                    <input 
+                      type="number"
+                      step="any"
+                      value={currentScaleConfig.customMin ?? compMin}
+                      onChange={(e) => setComponentScaleConfig(selectedComponentIndex, { customMin: parseFloat(e.target.value) || 0 })}
+                      className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[9px] text-indigo-300 mb-1 font-bold">Center (Ref)</label>
+                    <input 
+                      type="number"
+                      step="any"
+                      value={currentScaleConfig.customMid ?? compAvg}
+                      onChange={(e) => setComponentScaleConfig(selectedComponentIndex, { customMid: parseFloat(e.target.value) || 0 })}
+                      className="w-full bg-gray-900 border border-indigo-500/80 rounded-lg px-2 py-1 text-xs text-indigo-200 font-mono font-bold focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[9px] text-gray-400 mb-1 font-semibold">Maximum</label>
+                    <input 
+                      type="number"
+                      step="any"
+                      value={currentScaleConfig.customMax ?? compMax}
+                      onChange={(e) => setComponentScaleConfig(selectedComponentIndex, { customMax: parseFloat(e.target.value) || 1 })}
+                      className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Quick Presets */}
+                <div className="pt-2 border-t border-gray-800 space-y-1.5">
+                  <span className="block text-[9px] font-bold text-gray-500 uppercase tracking-wider">Bibliometric Presets:</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setComponentScaleConfig(selectedComponentIndex, {
+                        source: 'custom',
+                        customMin: 0,
+                        customMid: 1.0,
+                        customMax: Math.max(2.5, Math.ceil(rawMax * 10) / 10)
+                      })}
+                      className="px-2 py-1 bg-gray-900 hover:bg-gray-800 border border-gray-700 text-gray-300 text-[9px] font-semibold rounded-lg transition cursor-pointer"
+                      title="Category Normalized Citation Impact: Center at 1.0 (World average)"
+                    >
+                      CNCI (Ref: 1.0)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setComponentScaleConfig(selectedComponentIndex, {
+                        source: 'custom',
+                        customMin: 0,
+                        customMid: 1.0,
+                        customMax: Math.max(3.0, Math.ceil(rawMax * 10) / 10)
+                      })}
+                      className="px-2 py-1 bg-gray-900 hover:bg-gray-800 border border-gray-700 text-gray-300 text-[9px] font-semibold rounded-lg transition cursor-pointer"
+                      title="% Top 1% Most Cited Documents: Center at 1.0%"
+                    >
+                      % Top 1% (Ref: 1.0)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setComponentScaleConfig(selectedComponentIndex, {
+                        source: 'custom',
+                        customMin: 0,
+                        customMid: 10.0,
+                        customMax: Math.max(25.0, Math.ceil(rawMax * 10) / 10)
+                      })}
+                      className="px-2 py-1 bg-gray-900 hover:bg-gray-800 border border-gray-700 text-gray-300 text-[9px] font-semibold rounded-lg transition cursor-pointer"
+                      title="% Top 10% Most Cited Documents: Center at 10.0%"
+                    >
+                      % Top 10% (Ref: 10.0)
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-gray-950/70 p-3 rounded-xl border border-gray-800 text-[11px] space-y-2">
+                <div className="flex justify-between text-gray-400">
+                  <span>Minimum:</span>
+                  <span className="font-mono text-gray-200 font-bold">{compMin.toFixed(3)}</span>
+                </div>
+                <div className="flex justify-between text-indigo-300 font-semibold">
+                  <span>Mean ({scaleSource === 'weights' ? 'SOM' : 'Raw Data'}):</span>
+                  <span className="font-mono font-bold">{compAvg.toFixed(3)}</span>
+                </div>
+                <div className="flex justify-between text-gray-400">
+                  <span>Maximum:</span>
+                  <span className="font-mono text-gray-200 font-bold">{compMax.toFixed(3)}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex space-x-2 pt-2 border-t border-gray-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setComponentScaleConfig(selectedComponentIndex, { source: globalScaleSource });
+                  setIsScaleModalOpen(false);
+                }}
+                className="flex-1 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold rounded-xl transition cursor-pointer"
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsScaleModalOpen(false)}
+                className="flex-1 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition cursor-pointer"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
 
 
@@ -1157,10 +1407,30 @@ export const MallaHexagonal: React.FC<MallaHexagonalProps> = ({
                 </span>
                 {clusterId !== null && clusterId !== -1 && (
                   <span className="px-1.5 py-0.5 bg-purple-900/60 border border-purple-500/50 text-purple-200 text-[9px] font-bold rounded">
-                    Cluster {clusterId}
+                    {(clusterLabels && clusterLabels[clusterId]) || `Cluster ${clusterId + 1}`}
                   </span>
                 )}
               </div>
+
+              {visualizationMode === 'component' && result.weights && (
+                <div className="mb-2 py-1 px-2 bg-gray-900/80 rounded-lg border border-gray-800 flex items-center justify-between text-[10px]">
+                  <span className="text-gray-400 font-semibold">Neuron Weight:</span>
+                  <span className="font-mono font-bold text-emerald-400">
+                    {(() => {
+                      const rawW = result.weights[hoveredNeuron.index]?.[selectedComponentIndex] ?? 0;
+                      const denormW = denormalizeValue(rawW, selectedComponentIndex, normalizationInfo);
+                      const formatted = Math.abs(denormW) < 0.001 && denormW !== 0
+                        ? denormW.toExponential(3)
+                        : Math.abs(denormW) < 1 && !Number.isInteger(denormW)
+                          ? denormW.toFixed(4)
+                          : Number.isInteger(denormW)
+                            ? denormW.toLocaleString()
+                            : denormW.toFixed(2);
+                      return `${formatted} ${normalizationInfo ? `(Norm: ${rawW.toFixed(3)})` : ''}`;
+                    })()}
+                  </span>
+                </div>
+              )}
 
               <div className="space-y-1">
                 <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">

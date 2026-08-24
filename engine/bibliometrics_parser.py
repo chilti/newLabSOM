@@ -16,8 +16,8 @@ import metaknowledge as mk
 from vos_thesaurus import VosThesaurus
 from vos_nlp import extract_noun_phrases, filter_top_relevant_terms, calculate_relevance_scores
 from vos_parsers import (
-    is_dimensions_csv, is_lens_csv, is_vos_native_file,
-    parse_dimensions_csv, parse_lens_csv, parse_vos_native_json
+    is_dimensions_csv, is_lens_csv, is_openalex_csv, is_vos_native_file,
+    parse_dimensions_csv, parse_lens_csv, parse_openalex_csv, parse_vos_native_json
 )
 
 
@@ -748,12 +748,15 @@ def _process_record_list(
     thesaurus = VosThesaurus(thesaurus_filepath) if thesaurus_filepath else None
 
     # ── Choose term getter / NLP mining ──────────────────────────────────────
-    if extraction_source in ('title_abstract', 'title', 'abstract'):
+    base_type = network_type.split(':')[0]
+    sub_type = network_type.split(':')[1] if ':' in network_type else ''
+
+    if extraction_source in ('title_abstract', 'title', 'abstract') and (base_type == 'co-occurrence' or network_type == 'co-occurrence'):
         # NLP Noun Phrase Mining on Title and/or Abstract
         doc_extracted = []
         for r in records:
-            t = r.get('title', '') or ''
-            a = r.get('abstract', '') or ''
+            t = r.get('title', '') or r.get('TI', '') or ''
+            a = r.get('abstract', '') or r.get('AB', '') or ''
             if extraction_source == 'title_abstract':
                 full_text = f"{t}. {a}"
             elif extraction_source == 'title':
@@ -778,19 +781,53 @@ def _process_record_list(
             # Lookup by record index if available
             idx = records.index(r) if r in records else -1
             return rec_to_terms.get(idx, [])
-    elif network_type == 'co-authorship':
-        def term_getter(r):
-            authors = r.get('authors', [])
-            return thesaurus.apply_to_list(authors) if thesaurus else authors
-    elif network_type == 'co-occurrence':
-        def term_getter(r):
-            kw = r.get('keywords', [])
-            return thesaurus.apply_to_list(kw) if thesaurus else kw
     else:
-        return {
-            "success": False,
-            "error": f"Network type '{network_type}' is not supported for this dataset format."
-        }
+        def term_getter(r):
+            terms = []
+            if base_type == 'co-authorship':
+                if sub_type == 'organizations':
+                    terms = r.get('organizations') or r.get('C1') or []
+                elif sub_type == 'countries':
+                    terms = r.get('countries') or r.get('CU') or []
+                else:
+                    terms = r.get('authors') or r.get('AU') or []
+            elif base_type == 'co-occurrence':
+                if sub_type == 'author_keywords':
+                    terms = r.get('author_keywords') or r.get('DE') or []
+                elif sub_type == 'keywords_plus':
+                    terms = r.get('concepts') or r.get('ID') or []
+                else:
+                    terms = r.get('keywords') or r.get('DE_ID') or []
+            elif base_type in ('citation', 'bib-coupling'):
+                if sub_type == 'sources':
+                    s = r.get('source') or r.get('SO') or ''
+                    terms = [s] if s else []
+                elif sub_type == 'authors':
+                    terms = r.get('authors') or r.get('AU') or []
+                elif sub_type == 'organizations':
+                    terms = r.get('organizations') or r.get('C1') or []
+                elif sub_type == 'countries':
+                    terms = r.get('countries') or r.get('CU') or []
+                else:
+                    t = r.get('title') or r.get('TI') or ''
+                    terms = [t] if t else []
+            else:
+                # Custom tag / field
+                tag_candidates = [custom_tag, custom_tag.lower(), custom_tag.upper()]
+                for tc in tag_candidates:
+                    if tc in r:
+                        raw_val = r[tc]
+                        if isinstance(raw_val, list):
+                            terms = raw_val
+                        elif isinstance(raw_val, str) and raw_val:
+                            terms = [v.strip() for v in raw_val.split('|') if v.strip()] if '|' in raw_val else [raw_val.strip()]
+                        break
+
+            if isinstance(terms, str):
+                terms = [terms]
+            if thesaurus:
+                terms = thesaurus.apply_to_list(terms)
+            return [str(t).strip() for t in terms if str(t).strip() and str(t).strip().lower() != 'nan']
 
     global_graph = _build_cooccurrence_graph_from_records(
         records, term_getter, counting_method=counting_method, thesaurus=thesaurus
@@ -871,6 +908,15 @@ def read_and_generate_bibliometrics(
     # ── Route Lens.org CSV exports ────────────────────────────────────────────
     if is_lens_csv(filepath):
         records = parse_lens_csv(filepath)
+        return _process_record_list(
+            records, network_type, custom_tag, max_terms, min_cooccurrence, temporal,
+            extraction_source=extraction_source, counting_method=counting_method,
+            thesaurus_filepath=thesaurus_filepath, relevance_ratio=relevance_ratio
+        )
+
+    # ── Route OpenAlex CSV exports ────────────────────────────────────────────
+    if is_openalex_csv(filepath):
+        records = parse_openalex_csv(filepath)
         return _process_record_list(
             records, network_type, custom_tag, max_terms, min_cooccurrence, temporal,
             extraction_source=extraction_source, counting_method=counting_method,

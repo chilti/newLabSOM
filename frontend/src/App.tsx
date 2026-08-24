@@ -22,6 +22,8 @@ export default function App() {
   const {
     activeTab,
     setActiveTab,
+    sharedBibFile,
+    setSharedBibFile,
     isPreprocessing,
     preprocessBibliometrics,
     fetchSystemStatus,
@@ -114,7 +116,6 @@ export default function App() {
   }, []);
 
   // Preprocessor form states
-  const [bibFile, setBibFile] = useState<File | null>(null);
   const [networkType, setNetworkType] = useState<string>('co-occurrence:all_keywords');
   const [customTag, setCustomTag] = useState<string>('AU');
   const [customTag2, setCustomTag2] = useState<string>('DE');
@@ -227,13 +228,13 @@ export default function App() {
 
   const handlePreprocess = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!bibFile) {
+    if (!sharedBibFile) {
       alert("Please select a file first.");
       return;
     }
     const finalCustomTag = networkType.startsWith('bipartite') ? `${customTag},${customTag2}` : customTag;
     await preprocessBibliometrics(
-      bibFile,
+      sharedBibFile,
       networkType,
       finalCustomTag,
       maxTerms,
@@ -756,20 +757,20 @@ export default function App() {
                               accept=".txt,.csv,.tsv,.ris,.json,.map,.net"
                               onChange={(e) => {
                                 const file = e.target.files?.[0];
-                                if (file) setBibFile(file);
+                                if (file) setSharedBibFile(file);
                               }}
                               className="hidden"
                             />
                           </div>
 
-                          {bibFile && (
+                          {sharedBibFile && (
                             <div className="flex items-center space-x-2 bg-emerald-950/40 border border-emerald-800/60 px-3 py-1.5 rounded-lg">
-                              <span className="text-xs text-emerald-400 font-bold truncate max-w-[220px]" title={bibFile.name}>
-                                {bibFile.name}
+                              <span className="text-xs text-emerald-400 font-bold truncate max-w-[220px]" title={sharedBibFile.name}>
+                                {sharedBibFile.name}
                               </span>
                               <button
                                 type="button"
-                                onClick={() => setBibFile(null)}
+                                onClick={() => setSharedBibFile(null)}
                                 className="text-gray-500 hover:text-red-400 text-xs ml-auto"
                                 title="Clear file"
                               >

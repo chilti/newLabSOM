@@ -40,20 +40,20 @@ class SOMSolver:
     def initialize_weights(self, data, init_type="random"):
         n_samples = data.shape[0]
         
-        # Setup Tensors
-        self.grid_dist = torch.tensor(self.grid_dist_np, dtype=torch.float32, device=self.device)
-        self.coords = torch.tensor(self.coords_np, dtype=torch.float32, device=self.device)
+        # Setup Tensors in Float64 (Double Precision)
+        self.grid_dist = torch.tensor(self.grid_dist_np, dtype=torch.float64, device=self.device)
+        self.coords = torch.tensor(self.coords_np, dtype=torch.float64, device=self.device)
             
         if init_type == "random":
             mins = np.min(data, axis=0)
             maxs = np.max(data, axis=0)
             weights_np = np.random.uniform(mins, maxs, size=(self.rows * self.cols, self.input_dim))
-            self.weights = torch.tensor(weights_np, dtype=torch.float32, device=self.device)
+            self.weights = torch.tensor(weights_np, dtype=torch.float64, device=self.device)
         elif init_type == "linear" or init_type == "pca":
             from sklearn.decomposition import PCA
             pca = PCA(n_components=min(2, self.input_dim))
             pca.fit(data)
-            weights_np = np.zeros((self.rows * self.cols, self.input_dim))
+            weights_np = np.zeros((self.rows * self.cols, self.input_dim), dtype=np.float64)
             mean = np.mean(data, axis=0)
             weights_np += mean
             
@@ -69,9 +69,9 @@ class SOMSolver:
                 if self.input_dim > 2:
                     weights_np[i] += ny * pca.components_[1] * np.sqrt(pca.explained_variance_[1])
                     
-            self.weights = torch.tensor(weights_np, dtype=torch.float32, device=self.device)
+            self.weights = torch.tensor(weights_np, dtype=torch.float64, device=self.device)
         else:
-            self.weights = torch.zeros((self.rows * self.cols, self.input_dim), dtype=torch.float32, device=self.device)
+            self.weights = torch.zeros((self.rows * self.cols, self.input_dim), dtype=torch.float64, device=self.device)
             
     def _compute_distances(self, X):
         """Computes pairwise distances from X (N, D) to self.weights (M, D). Returns (N, M)."""
@@ -87,13 +87,13 @@ class SOMSolver:
             return torch.cdist(X, self.weights, p=2.0)
             
     def train_basic(self, data, iterations, learning_rate_start=0.5, sigma_start=None):
-        """Sequential/online SOM training. Slow due to iteration, but supported."""
+        """Sequential/online SOM training with full double precision."""
         n_samples = data.shape[0]
         if sigma_start is None:
             sigma_start = max(self.rows, self.cols) / 2.0
             
         quantization_errors = []
-        X = torch.tensor(data, dtype=torch.float32, device=self.device)
+        X = torch.tensor(data, dtype=torch.float64, device=self.device)
         
         for t in range(iterations):
             lr = learning_rate_start * (1.0 - t / iterations)
@@ -118,13 +118,13 @@ class SOMSolver:
         return quantization_errors
 
     def train_batch(self, data, iterations, sigma_start=None):
-        """Fully vectorized, highly parallel Batch SOM training on GPU/Multicore."""
+        """Fully vectorized, highly parallel Batch SOM training with double precision on GPU/Multicore."""
         n_samples = data.shape[0]
         if sigma_start is None:
             sigma_start = max(self.rows, self.cols) / 2.0
             
         quantization_errors = []
-        X = torch.tensor(data, dtype=torch.float32, device=self.device)
+        X = torch.tensor(data, dtype=torch.float64, device=self.device)
         
         for t in range(iterations):
             sigma = sigma_start * np.exp(-t / iterations)
@@ -214,8 +214,8 @@ class SOMSolver:
         return results
 
     def get_bmus_and_frequencies(self, data):
-        """Maps dataset and calculates hit frequencies and quantization errors."""
-        X = torch.tensor(data, dtype=torch.float32, device=self.device)
+        """Maps dataset and calculates hit frequencies and quantization errors in full double precision."""
+        X = torch.tensor(data, dtype=torch.float64, device=self.device)
         n_neurons = self.rows * self.cols
         
         dists = self._compute_distances(X)
@@ -224,10 +224,10 @@ class SOMSolver:
         selected_weights = self.weights[bmus]
         sample_errors = torch.norm(X - selected_weights, dim=1)
         
-        frequencies = torch.zeros(n_neurons, dtype=torch.float32, device=self.device)
-        quantization_errors = torch.zeros(n_neurons, dtype=torch.float32, device=self.device)
+        frequencies = torch.zeros(n_neurons, dtype=torch.float64, device=self.device)
+        quantization_errors = torch.zeros(n_neurons, dtype=torch.float64, device=self.device)
         
-        frequencies.scatter_add_(0, bmus, torch.ones_like(bmus, dtype=torch.float32))
+        frequencies.scatter_add_(0, bmus, torch.ones_like(bmus, dtype=torch.float64))
         quantization_errors.scatter_add_(0, bmus, sample_errors)
         
         max_freq = torch.max(frequencies)

@@ -5,6 +5,8 @@ import { SendToAssistantButton } from './SendToAssistantButton';
 
 export const SemanticBibliometrics: React.FC = () => {
   const {
+    sharedBibFile,
+    setSharedBibFile,
     semanticRecords,
     semanticEmbeddings,
     semanticIntrinsicData,
@@ -34,8 +36,6 @@ export const SemanticBibliometrics: React.FC = () => {
     clearSemanticState
   } = useSomStore();
 
-
-  const [bibFile, setBibFile] = useState<File | null>(null);
   const [useMesh, setUseMesh] = useState<boolean>(false);
   
   // Field check boxes
@@ -53,16 +53,16 @@ export const SemanticBibliometrics: React.FC = () => {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setBibFile(file);
+      setSharedBibFile(file);
     }
   };
 
   const runPreprocessing = async () => {
-    if (!bibFile) return;
+    if (!sharedBibFile) return;
     const extraFields: string[] = [];
     if (extractJournal) extraFields.push('SO');
 
-    await preprocessSemantic(bibFile, useMesh, extraFields, extractTitle, extractAbstract, extractKeywords);
+    await preprocessSemantic(sharedBibFile, useMesh, extraFields, extractTitle, extractAbstract, extractKeywords);
   };
 
   const handleEmbed = async () => {
@@ -141,14 +141,17 @@ export const SemanticBibliometrics: React.FC = () => {
               >
                 <Upload className="w-8 h-8 text-gray-500 mb-2" />
                 <p className="text-xs text-gray-300 font-medium">Browse bibliographic file</p>
-                <p className="text-[10px] text-gray-600 mt-1">WoS, Scopus (.txt, .csv) or PubMed (.txt)</p>
+                <p className="text-[10px] text-gray-600 mt-1">WoS, Scopus (.txt, .csv), PubMed (.txt), RIS, VOS JSON</p>
               </div>
-              <input type="file" ref={fileInputRef} accept=".txt,.csv,.tsv" className="hidden" onChange={handleFileUpload} />
+              <input type="file" ref={fileInputRef} accept=".txt,.csv,.tsv,.ris,.json,.map,.net" className="hidden" onChange={handleFileUpload} />
               
-              {bibFile && (
-                <div className="bg-gray-950 px-3 py-2 rounded-xl border border-gray-800 flex justify-between items-center">
-                  <span className="text-xs text-emerald-400 font-bold truncate max-w-[180px]">{bibFile.name}</span>
-                  <button onClick={() => setBibFile(null)} className="text-[10px] text-gray-500 hover:text-white">Clear</button>
+              {sharedBibFile && (
+                <div className="bg-emerald-950/40 px-3 py-2.5 rounded-xl border border-emerald-800/60 flex justify-between items-center">
+                  <div className="flex flex-col min-w-0 pr-2">
+                    <span className="text-xs text-emerald-400 font-bold truncate" title={sharedBibFile.name}>{sharedBibFile.name}</span>
+                    <span className="text-[10px] text-gray-400 font-mono">{(sharedBibFile.size / 1024).toFixed(1)} KB &bull; Shared file ready</span>
+                  </div>
+                  <button onClick={() => setSharedBibFile(null)} className="text-[10px] text-gray-500 hover:text-red-400 font-bold px-1.5 py-0.5" title="Remove file">✕ Clear</button>
                 </div>
               )}
 
@@ -183,8 +186,8 @@ export const SemanticBibliometrics: React.FC = () => {
 
               <button
                 onClick={runPreprocessing}
-                disabled={isSemanticPreprocessing || !bibFile}
-                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-800 disabled:text-gray-600 text-white text-xs font-bold rounded-xl transition flex items-center justify-center space-x-2"
+                disabled={isSemanticPreprocessing || !sharedBibFile}
+                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-800 disabled:text-gray-600 text-white text-xs font-bold rounded-xl transition flex items-center justify-center space-x-2 cursor-pointer disabled:cursor-not-allowed"
               >
                 {isSemanticPreprocessing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
                 <span>Process File</span>

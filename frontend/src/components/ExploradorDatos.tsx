@@ -16,7 +16,8 @@ import {
   ZoomOut,
   ChevronDown,
   ChevronRight,
-  Download
+  Download,
+  RotateCcw
 } from 'lucide-react';
 import { 
   RadarChart, 
@@ -36,6 +37,7 @@ import type { MetricResult } from './ClusterMetricsPanel';
 import { TrainingErrorPanel } from './TrainingErrorPanel';
 import { parseTrajectoryEntity } from '../utils/timeSeries';
 import { SendToAssistantButton } from './SendToAssistantButton';
+import { denormalizeValue } from '../utils/normalization';
 
 export const ExploradorDatos: React.FC = () => {
   const { 
@@ -87,7 +89,11 @@ export const ExploradorDatos: React.FC = () => {
     somSizeMode,
     setSomSizeMode,
     suggestedBigSom,
-    suggestedSmallSom
+    suggestedSmallSom,
+    componentScaleConfigs,
+    globalScaleSource,
+    setGlobalScaleSource,
+    resetComponentScaleConfigs
   } = useSomStore();
 
   // Alias store names to match local usage in JSX
@@ -319,7 +325,8 @@ export const ExploradorDatos: React.FC = () => {
         label: labels[sampleIdx] || `Entity ${sampleIdx + 1}`,
         distance: Math.sqrt(sumSq),
         belongsToCluster,
-        row
+        row,
+        rawRow: originalDataMatrix ? originalDataMatrix[sampleIdx] : undefined
       };
     });
 
@@ -333,7 +340,7 @@ export const ExploradorDatos: React.FC = () => {
       centroidVector,
       unitsOrderedByDist: finalUnitsList
     };
-  }, [result, dataMatrix, labels, compNames, selectedClusterId]);
+  }, [result, dataMatrix, originalDataMatrix, labels, compNames, selectedClusterId]);
 
   // When cluster changes, auto-select Top 2 closest units by default
   useEffect(() => {
@@ -360,8 +367,14 @@ export const ExploradorDatos: React.FC = () => {
     const clusters = Array.from(new Set(clustering.filter(c => c !== -1))).sort((a, b) => a - b);
 
     const summaries = clusters.map(cId => {
-      const clusterNeuronIndices = clustering.map((c, i) => c === cId ? i : -1).filter(i => i !== -1);
-      const clusterNeuronSet = new Set(clusterNeuronIndices);
+      const clusterNeuronIndices: number[] = [];
+      const clusterNeuronSet = new Set<number>();
+      clustering.forEach((c, idx) => {
+        if (c === cId) {
+          clusterNeuronIndices.push(idx);
+          clusterNeuronSet.add(idx);
+        }
+      });
 
       // Centroid Vector (Average of neuron reference weights in this cluster)
       const centroidVector = new Array(numFeatures).fill(0);
@@ -379,7 +392,7 @@ export const ExploradorDatos: React.FC = () => {
       const mappedEntities = labels.filter((_, idx) => bmus && clusterNeuronSet.has(bmus[idx]));
 
       // Custom cluster label if user renamed it
-      const customClusterName = (clusterLabels && clusterLabels[cId]) ? clusterLabels[cId] : `Cluster ${cId}`;
+      const customClusterName = (clusterLabels && clusterLabels[cId]) ? clusterLabels[cId] : `Cluster ${cId + 1}`;
 
       // Top distinguishing dimensions for this centroid
       const compWithValues = compNames.map((name, f) => ({ name, val: centroidVector[f] }));
@@ -411,7 +424,8 @@ export const ExploradorDatos: React.FC = () => {
       name: u.label,
       distance: u.distance,
       color: colorsList[idx % colorsList.length],
-      row: u.row
+      row: u.row,
+      rawRow: u.rawRow
     }));
 
     const chartData = compNames.map((indicatorName, fIdx) => {
@@ -427,7 +441,8 @@ export const ExploradorDatos: React.FC = () => {
 
     return {
       chartData,
-      activeUnits
+      activeUnits,
+      centroidVector
     };
   }, [clusterCalculations, compNames, selectedRadarUnits]);
 
@@ -1327,7 +1342,11 @@ export const ExploradorDatos: React.FC = () => {
                 <tr key={rIdx} className="hover:bg-gray-800 transition-colors">
                   <td className="p-2 text-[10px] text-indigo-300 font-bold border-r border-gray-800 sticky left-0 bg-gray-950 z-10 truncate max-w-[120px]" title={currentLabels[rIdx]}>{currentLabels[rIdx]}</td>
                   {row.slice(0, previewCols).map((val, cIdx) => (
-                    <td key={cIdx} className="p-2 text-[10px] text-gray-400 font-mono">{typeof val === 'number' ? val.toFixed(3) : val}</td>
+                    <td key={cIdx} className="p-2 text-[10px] text-gray-400 font-mono">
+                      {typeof val === 'number'
+                        ? (val === 0 ? '0' : Math.abs(val) < 0.001 ? val.toExponential(3) : Math.abs(val) < 1 ? val.toFixed(4) : val.toFixed(3))
+                        : val}
+                    </td>
                   ))}
                   {currentCompNames.length > previewCols && <td className="p-2 text-[10px] text-gray-600">...</td>}
                 </tr>
@@ -2343,12 +2362,12 @@ export const ExploradorDatos: React.FC = () => {
 
                           <div className="flex items-center space-x-2">
                             <SendToAssistantButton
-                              title={`SOM Cluster ${selectedClusterId} Radar Profile (${unitAnalysisName})`}
+                              title={`SOM ${(clusterLabels && clusterLabels[selectedClusterId]) || `Cluster ${selectedClusterId + 1}`} Radar Profile (${unitAnalysisName})`}
                               badge="SOM & UMAP"
                               viewSource="som"
                               chartType="radar"
                               data={clusterRadarData.chartData || []}
-                              dataContextPrompt={`Radar Profile for Cluster ${selectedClusterId} ("${(clusterLabels && clusterLabels[selectedClusterId]) || `Cluster ${selectedClusterId}`}") in the SOM Map.\n` +
+                              dataContextPrompt={`Radar Profile for ${(clusterLabels && clusterLabels[selectedClusterId]) || `Cluster ${selectedClusterId + 1}`} in the SOM Map.\n` +
                                 `Model / Experiment: "${somTitleName}".\n` +
                                 `Unit of Analysis: "${unitAnalysisName}".\n` +
                                 `Evaluated Variables and Exact Centroid Vector Values:\n` +
@@ -2365,7 +2384,9 @@ export const ExploradorDatos: React.FC = () => {
                                   className="bg-gray-950 border border-gray-700 rounded-lg px-2.5 py-1 text-xs font-bold text-indigo-400 focus:outline-none focus:border-indigo-500 cursor-pointer"
                                 >
                                   {availableClusterIds.map(cId => (
-                                    <option key={cId} value={cId}>Cluster {cId}</option>
+                                    <option key={cId} value={cId}>
+                                      {(clusterLabels && clusterLabels[cId]) ? clusterLabels[cId] : `Cluster ${cId + 1}`}
+                                    </option>
                                   ))}
                                 </select>
                               </div>
@@ -2421,13 +2442,70 @@ export const ExploradorDatos: React.FC = () => {
                                 />
                                 <PolarRadiusAxis domain={[0, 1]} angle={30} stroke="#475569" fontSize={9} />
                                 <RechartsTooltip 
-                                  contentStyle={{ backgroundColor: '#090d16', borderColor: '#1e293b', borderRadius: '12px', fontSize: 11, color: '#fff' }}
+                                  content={({ active, payload, label }) => {
+                                    if (!active || !payload || !payload.length) return null;
+                                    const fIdx = compNames.indexOf(label as string);
+                                    return (
+                                      <div className="bg-[#090d16]/95 border border-[#1e293b] rounded-xl p-3 shadow-2xl backdrop-blur-md text-xs text-gray-200 min-w-[210px]">
+                                        <div className="font-black text-indigo-400 pb-1.5 mb-2 border-b border-gray-800 uppercase tracking-wider text-[11px]">
+                                          {label}
+                                        </div>
+                                        <div className="space-y-1.5">
+                                          {payload.map((entry: any, i: number) => {
+                                            const normVal = typeof entry.value === 'number' ? entry.value : parseFloat(entry.value) || 0;
+                                            let originalVal: number | null = null;
+                                            
+                                            if (entry.dataKey === 'Centroid') {
+                                              const rawC = clusterRadarData.centroidVector?.[fIdx] ?? normVal;
+                                              originalVal = fIdx !== -1 ? denormalizeValue(rawC, fIdx, normalizationInfo) : rawC;
+                                            } else {
+                                              const activeUnit = clusterRadarData.activeUnits.find(u => u.name === entry.dataKey);
+                                              if (activeUnit?.rawRow && fIdx !== -1 && activeUnit.rawRow[fIdx] !== undefined) {
+                                                originalVal = activeUnit.rawRow[fIdx];
+                                              } else if (fIdx !== -1) {
+                                                originalVal = denormalizeValue(normVal, fIdx, normalizationInfo);
+                                              }
+                                            }
+
+                                            const formattedOriginal = originalVal !== null
+                                              ? (originalVal === 0
+                                                  ? '0'
+                                                  : Math.abs(originalVal) < 0.001
+                                                    ? originalVal.toExponential(3)
+                                                    : Math.abs(originalVal) < 1 && !Number.isInteger(originalVal)
+                                                      ? originalVal.toFixed(4)
+                                                      : Number.isInteger(originalVal)
+                                                        ? originalVal.toLocaleString()
+                                                        : originalVal.toFixed(2))
+                                              : normVal.toFixed(3);
+
+                                            return (
+                                              <div key={i} className="flex items-center justify-between gap-3 text-[11px]">
+                                                <div className="flex items-center space-x-1.5 truncate max-w-[140px]">
+                                                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: entry.color || entry.stroke }} />
+                                                  <span className="text-gray-300 font-semibold truncate" title={entry.name}>{entry.name}</span>
+                                                </div>
+                                                <div className="text-right shrink-0 font-mono">
+                                                  <span className="font-bold text-white">{formattedOriginal}</span>
+                                                  {normalizationInfo && (
+                                                    <span className="text-[9px] text-gray-500 ml-1.5" title={`Normalized value: ${normVal.toFixed(3)}`}>
+                                                      ({normVal.toFixed(2)})
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    );
+                                  }}
                                 />
                                 <Legend 
                                   wrapperStyle={{ fontSize: 11, paddingTop: 5 }}
                                 />
                                 <Radar 
-                                  name={`Cluster ${selectedClusterId} Centroid`} 
+                                  name={`${(clusterLabels && clusterLabels[selectedClusterId]) || `Cluster ${selectedClusterId + 1}`} Centroid`} 
                                   dataKey="Centroid" 
                                   stroke="#8b5cf6" 
                                   fill="#8b5cf6" 
@@ -2477,8 +2555,51 @@ export const ExploradorDatos: React.FC = () => {
                           onChange={(e) => setShowLabelsOnComponents(e.target.checked)}
                           className="w-4 h-4 bg-gray-950 border-gray-850 rounded text-indigo-500 focus:ring-indigo-500 focus:ring-offset-gray-900 cursor-pointer"
                         />
-                        <span className="font-bold text-indigo-400 uppercase tracking-wider text-[10px]">Draw Labels on Component Maps</span>
+                        <span className="font-bold text-indigo-400 uppercase tracking-wider text-[10px]">Draw Labels</span>
                       </label>
+
+                      <span className="text-gray-700">|</span>
+
+                      {/* Global Scale Calculation Source Toggle */}
+                      <div className="flex items-center space-x-1 bg-gray-950 p-1 rounded-xl border border-gray-800 text-[10px]">
+                        <span className="text-gray-500 font-bold px-1 uppercase">Scale:</span>
+                        <button
+                          type="button"
+                          onClick={() => setGlobalScaleSource('raw')}
+                          className={`px-2 py-0.5 rounded-lg font-bold transition cursor-pointer ${
+                            globalScaleSource === 'raw'
+                              ? 'bg-indigo-600 text-white shadow'
+                              : 'text-gray-400 hover:text-gray-200'
+                          }`}
+                          title="Calculate min, mean and max using denormalized raw dataset values"
+                        >
+                          Raw Data
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setGlobalScaleSource('weights')}
+                          className={`px-2 py-0.5 rounded-lg font-bold transition cursor-pointer ${
+                            globalScaleSource === 'weights'
+                              ? 'bg-indigo-600 text-white shadow'
+                              : 'text-gray-400 hover:text-gray-200'
+                          }`}
+                          title="Calculate min, mean and max using SOM codebook weight vectors"
+                        >
+                          SOM Weights
+                        </button>
+                      </div>
+
+                      {Object.keys(componentScaleConfigs).length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => resetComponentScaleConfigs()}
+                          className="px-2 py-1 bg-gray-950 hover:bg-gray-800 border border-gray-800 hover:border-amber-500/50 text-gray-400 hover:text-amber-300 rounded-xl text-[10px] font-bold transition cursor-pointer flex items-center space-x-1"
+                          title="Reset all custom manual ranges to automatic defaults"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Reset Custom</span>
+                        </button>
+                      )}
                     </div>
 
                     {/* Swap controls for variable grid pages */}
@@ -2513,20 +2634,20 @@ export const ExploradorDatos: React.FC = () => {
                         <div 
                           key={globalIdx} 
                           id={elementId}
-                          className="relative border border-gray-800 bg-gray-900 bg-opacity-30 rounded-xl p-4 flex flex-col h-[280px] shadow-md transition-all hover:border-indigo-500"
+                          className="border border-gray-800 bg-gray-900 bg-opacity-30 rounded-xl p-4 flex flex-col h-[290px] shadow-md transition-all hover:border-indigo-500"
                         >
-                          <div className="absolute top-3 right-3 z-20">
+                          <div className="flex items-center justify-between mb-2 gap-2">
+                            <span className="text-[11px] font-black uppercase text-gray-300 block truncate" title={name}>
+                              {name}
+                            </span>
                             <button
+                              type="button"
                               onClick={() => openMapPopup(elementId, `Component Map: ${name}`)}
-                              className="p-1-5 bg-gray-950 border border-gray-850 hover:border-indigo-500 text-gray-400 hover:text-white rounded-lg transition cursor-pointer"
+                              className="p-1.5 bg-gray-950 border border-gray-800 hover:border-indigo-500 text-gray-400 hover:text-white rounded-lg transition cursor-pointer shrink-0"
                               title="Open Standalone View"
                             >
                               <ExternalLink className="w-3.5 h-3.5" />
                             </button>
-                          </div>
-                          
-                          <div className="mb-2 pr-8">
-                            <span className="text-10 font-black uppercase text-gray-400 block truncate">{name}</span>
                           </div>
 
                           <div className="flex-1 min-h-0">

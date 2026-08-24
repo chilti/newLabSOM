@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Upload, Activity, BarChart2, CheckSquare, Square, ChevronDown, ChevronRight, Loader2, Download, Database, TrendingUp } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Upload, Activity, BarChart2, CheckSquare, Square, ChevronDown, ChevronRight, Loader2, Download, Database, TrendingUp, Filter, Check } from 'lucide-react';
 import { useSomStore, getApiUrl } from '../store/somStore';
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -133,12 +134,34 @@ const ExportButtons: React.FC<{
     );
 };
 
-// ── Unit Detail Panel ──────────────────────────────────────────────────────
-// Receives the already-loaded data for ONE unit and renders its charts/table.
+const parseVal = (raw: any): number => {
+    if (typeof raw === 'number') return isNaN(raw) ? 0 : raw;
+    if (typeof raw === 'string') return parseFloat(raw.replace('%', '').replace(',', '.').trim()) || 0;
+    return 0;
+};
+
 const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }) => {
-    const { loadCsvData, setActiveTab, setConfig, incitesSidebarTab, setIncitesState } = useSomStore();
+    const { 
+        loadCsvData, 
+        setActiveTab, 
+        setConfig, 
+        incitesSidebarTab, 
+        setIncitesState,
+        incitesLimitTop50,
+        incitesFilterIndicator,
+        incitesFilterMinValue,
+        incitesIsFilterActive,
+        incitesIsFilterModalOpen
+    } = useSomStore();
     const sidebarTab = incitesSidebarTab || 'profiles';
     const setSidebarTab = (tab: 'profiles' | 'temporal') => setIncitesState({ incitesSidebarTab: tab });
+
+    const limitTop50 = incitesLimitTop50 !== undefined ? incitesLimitTop50 : true;
+    const filterIndicator = incitesFilterIndicator || (unit?.indicators?.includes('Web of Science Documents') ? 'Web of Science Documents' : (unit?.indicators?.[0] || ''));
+    const filterMinValue = incitesFilterMinValue ?? '';
+    const isFilterActive = incitesIsFilterActive || false;
+    const isFilterModalOpen = incitesIsFilterModalOpen || false;
+    const setIsFilterModalOpen = (open: boolean) => setIncitesState({ incitesIsFilterModalOpen: open });
 
     const [selectedProfileIndicators, setSelectedProfileIndicators] = useState<string[]>([]);
     const [isProfileExpanded, setIsProfileExpanded] = useState<boolean>(false);
@@ -187,19 +210,25 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
             if (!entitySortBy || !unit.indicators.includes(entitySortBy)) {
                 setEntitySortBy(unit.indicators.includes('Share') ? 'Share' : (unit.indicators.includes('Web of Science Documents') ? 'Web of Science Documents' : unit.indicators[0]));
             }
+            if (!incitesFilterIndicator || !unit.indicators.includes(incitesFilterIndicator)) {
+                setIncitesState({ incitesFilterIndicator: unit.indicators.includes('Web of Science Documents') ? 'Web of Science Documents' : unit.indicators[0] });
+            }
+            const indX = unit.indicators.find((i: string) => i.includes('Share')) || unit.indicators[0];
+            const indY = unit.indicators.find((i: string) => i !== indX && (i.includes('% Documents in Top 10%') || i.includes('Category Normalized') || i.includes('Impact'))) || unit.indicators.find((i: string) => i !== indX) || unit.indicators[1] || indX;
+            const indSize = unit.indicators.find((i: string) => i !== indX && i !== indY && (i.includes('Web of Science Documents') || i.includes('Times Cited') || i.includes('Documents'))) || unit.indicators.find((i: string) => i !== indX && i !== indY) || unit.indicators[2] || indX;
+            const indColor = unit.indicators.find((i: string) => i !== indX && i !== indY && i !== indSize && (i.includes('CNCI') || i.includes('Average Percentile') || i.includes('Citation') || i.includes('Top 1%'))) || unit.indicators.find((i: string) => i !== indX && i !== indY && i !== indSize) || unit.indicators[3] || indX;
+
             if (!bubbleIndX || !unit.indicators.includes(bubbleIndX)) {
-                setBubbleIndX(unit.indicators.includes('Share') ? 'Share' : unit.indicators[0]);
+                setBubbleIndX(indX);
             }
             if (!bubbleIndY || !unit.indicators.includes(bubbleIndY)) {
-                const yDefault = unit.indicators.find((i: string) => i.includes('% Documents in Top 10%') || i.includes('% Documents in Q1') || i.includes('Impact')) || unit.indicators[1] || unit.indicators[0];
-                setBubbleIndY(yDefault);
+                setBubbleIndY(indY);
             }
             if (!bubbleIndSize || !unit.indicators.includes(bubbleIndSize)) {
-                setBubbleIndSize(unit.indicators.includes('Web of Science Documents') ? 'Web of Science Documents' : unit.indicators[0]);
+                setBubbleIndSize(indSize);
             }
             if (!bubbleIndColor || !unit.indicators.includes(bubbleIndColor)) {
-                const cDefault = unit.indicators.find((i: string) => i.includes('CNCI') || i.includes('Q3') || i.includes('Percentile') || i.includes('Citation')) || unit.indicators[2] || unit.indicators[0];
-                setBubbleIndColor(cDefault);
+                setBubbleIndColor(indColor);
             }
         }
         if (unit.time_series) {
@@ -243,18 +272,61 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
         setEntityLimit('custom');
     };
 
-    // Filtered evolution data
+    // Extract unique entities according to the Temporal Heatmap Matrix ranking order
+    const evoUniqueEntities = useMemo(() => {
+        const raw = unit?.profile_evolution?.[evolutionSmoothing];
+        if (!raw || raw.length === 0) return [];
+        const seen = new Set<string>();
+        const list: string[] = [];
+        for (const r of raw) {
+            const rawName = String(r.entity || '');
+            const ent = rawName.includes('_') ? rawName.substring(rawName.indexOf('_') + 1) : rawName;
+            if (ent && !seen.has(ent)) {
+                seen.add(ent);
+                list.push(ent);
+            }
+        }
+        return list;
+    }, [unit, evolutionSmoothing]);
+
+    const [temporalEntityLimit, setTemporalEntityLimit] = useState<number | 'all' | 'custom'>(5);
+    const [temporalSelectedEntities, setTemporalSelectedEntities] = useState<string[]>([]);
+    const [isTemporalEntitiesExpanded, setIsTemporalEntitiesExpanded] = useState<boolean>(true);
+
+    useEffect(() => {
+        if (evoUniqueEntities.length === 0 || temporalEntityLimit === 'custom') return;
+        if (temporalEntityLimit === 'all') {
+            setTemporalSelectedEntities(evoUniqueEntities);
+        } else {
+            setTemporalSelectedEntities(evoUniqueEntities.slice(0, temporalEntityLimit));
+        }
+    }, [evoUniqueEntities, temporalEntityLimit]);
+
+    const toggleTemporalEntity = (ent: string) => {
+        setTemporalSelectedEntities(prev =>
+            prev.includes(ent) ? prev.filter(e => e !== ent) : [...prev, ent]
+        );
+        setTemporalEntityLimit('custom');
+    };
+
+    // Filtered evolution data (all trajectory rows for the selected temporal entities)
     const filteredEvoData = useMemo(() => {
         const raw = unit?.profile_evolution?.[evolutionSmoothing];
         if (!raw || raw.length === 0) return [];
-        if (!filterEvoZeros || selectedProfileIndicators.length === 0) return raw;
-        return raw.filter((row: any) =>
+        const matchingRows = raw.filter((row: any) => {
+            const rawName = String(row.entity || '');
+            const ent = rawName.includes('_') ? rawName.substring(rawName.indexOf('_') + 1) : rawName;
+            return temporalSelectedEntities.includes(ent);
+        });
+
+        if (!filterEvoZeros || selectedProfileIndicators.length === 0) return matchingRows;
+        return matchingRows.filter((row: any) =>
             selectedProfileIndicators.some((ind: string) => {
                 const v = row[ind];
                 return typeof v === 'number' && v !== 0;
             })
         );
-    }, [unit, evolutionSmoothing, filterEvoZeros, selectedProfileIndicators]);
+    }, [unit, evolutionSmoothing, temporalSelectedEntities, filterEvoZeros, selectedProfileIndicators]);
 
     const hasRecentData = unit.profile_5years && unit.profile_5years.length > 0;
     const activeProfile = useRecent && hasRecentData ? unit.profile_5years : unit.profile;
@@ -298,27 +370,58 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
         return activeQuartiles.filter((q: any) => selectedChartEntities.includes(q.entity));
     }, [activeQuartiles, selectedChartEntities]);
 
+    const matchingFilterCount = useMemo(() => {
+        if (!activeProfile || !filterIndicator) return 0;
+        const thresholdNum = parseFloat(String(filterMinValue));
+        if (isNaN(thresholdNum) || thresholdNum <= 0) return activeProfile.length;
+        return activeProfile.filter((r: any) => parseVal(r[filterIndicator]) >= thresholdNum).length;
+    }, [activeProfile, filterIndicator, filterMinValue]);
+
     const handleTrainSOM = () => {
         if (!unit || selectedProfileIndicators.length === 0) return;
         if (!activeProfile || activeProfile.length === 0) {
             alert("No profile data available for this unit.");
             return;
         }
+
+        // 1. Apply threshold filtering if active
+        let candidateRows = [...activeProfile];
+        const thresholdNum = parseFloat(String(filterMinValue));
+        if (isFilterActive && filterIndicator && !isNaN(thresholdNum) && thresholdNum > 0) {
+            candidateRows = candidateRows.filter((r: any) => {
+                const val = parseVal(r[filterIndicator]);
+                return val >= thresholdNum;
+            });
+        }
+
+        if (candidateRows.length === 0) {
+            alert(`No entities match the filter criteria (${filterIndicator} >= ${filterMinValue}).`);
+            return;
+        }
+
+        // 2. Apply Top 50 limit if checked
+        const finalRows = limitTop50 ? candidateRows.slice(0, 50) : candidateRows;
+
         let csvContent = "Entity," + selectedProfileIndicators.join(",") + "\n";
-        activeProfile.forEach((row: any) => {
+        finalRows.forEach((row: any) => {
             const rowData = [
                 `"${row.entity}"`,
                 ...selectedProfileIndicators.map((ind: string) => row[ind] ?? 0)
             ];
             csvContent += rowData.join(",") + "\n";
         });
+
+        const filterDescription = isFilterActive && filterIndicator && !isNaN(thresholdNum) && thresholdNum > 0
+            ? `Filtered (${filterIndicator} >= ${thresholdNum})`
+            : 'All entities';
+
         loadCsvData(csvContent, 0, [], 'csv', `${unitName}_Profile`, {
             originType: 'incites',
             unitName: unitName,
-            subView: 'Multidimensional Profile',
+            subView: `Multidimensional Profile (${finalRows.length} entities)`,
             indicatorsCount: selectedProfileIndicators.length,
             indicatorsList: selectedProfileIndicators,
-            smoothingInfo: 'RAW'
+            smoothingInfo: `${filterDescription} | ${limitTop50 ? 'Max 50' : 'Unbounded'}`
         });
         setConfig({ method: 'batch', init: 'pca' });
         setActiveTab('multidimensional');
@@ -326,9 +429,8 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
 
     const handleTrainSOMEvo = () => {
         if (!unit?.profile_evolution || !unit.profile_evolution[evolutionSmoothing] || selectedProfileIndicators.length === 0) return;
-        const evoProfile = unit.profile_evolution[evolutionSmoothing];
-        if (evoProfile.length === 0) {
-            alert("No evolution profile data available.");
+        if (filteredEvoData.length === 0) {
+            alert("No temporal trajectory rows match the selected entities.");
             return;
         }
         let csvContent = "Entity," + selectedProfileIndicators.join(",") + "\n";
@@ -339,50 +441,70 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
             ];
             csvContent += rowData.join(",") + "\n";
         });
-        loadCsvData(csvContent, 0, [], 'csv', `${unitName}_Evolution`, {
+        loadCsvData(csvContent, 0, [], 'csv', `${unitName}_TemporalEvolution`, {
             originType: 'incites',
             unitName: unitName,
-            subView: 'Heatmap Matrix',
+            subView: `Temporal Evolution (${temporalSelectedEntities.length} entities · ${filteredEvoData.length} rows)`,
             indicatorsCount: selectedProfileIndicators.length,
             indicatorsList: selectedProfileIndicators,
-            smoothingInfo: evolutionSmoothing.toUpperCase()
+            smoothingInfo: `${evolutionSmoothing.toUpperCase()} | ${temporalSelectedEntities.length} entities`
         });
         setConfig({ method: 'batch', init: 'pca' });
         setActiveTab('multidimensional');
     };
 
     const handleTrainSOMQuartiles = () => {
-        if (!quartileChartData || quartileChartData.length === 0) {
+        if (!unit || !activeQuartiles || activeQuartiles.length === 0) {
             alert("No quartile data available to train SOM.");
             return;
         }
+
+        // 1. Filter entities from activeQuartiles using the active threshold filter on activeProfile
+        let candidateRows = [...activeQuartiles];
+        const thresholdNum = parseFloat(String(filterMinValue));
+        if (isFilterActive && filterIndicator && !isNaN(thresholdNum) && thresholdNum > 0 && activeProfile) {
+            const matchingEntities = new Set(
+                activeProfile
+                    .filter((r: any) => parseVal(r[filterIndicator]) >= thresholdNum)
+                    .map((r: any) => String(r.entity))
+            );
+            candidateRows = candidateRows.filter((q: any) => matchingEntities.has(String(q.entity)));
+        }
+
+        if (candidateRows.length === 0) {
+            alert(`No entities match the filter criteria (${filterIndicator} >= ${filterMinValue}).`);
+            return;
+        }
+
+        // 2. Apply Max 50 limit if enabled
+        const finalRows = limitTop50 ? candidateRows.slice(0, 50) : candidateRows;
+
         let csvContent = "Entity,Q1,Q2,Q3,Q4\n";
-        quartileChartData.forEach((row: any) => {
+        finalRows.forEach((row: any) => {
             const rowData = [
                 `"${row.entity}"`,
-                row.Q1 ?? 0,
-                row.Q2 ?? 0,
-                row.Q3 ?? 0,
-                row.Q4 ?? 0
+                parseVal(row.Q1),
+                parseVal(row.Q2),
+                parseVal(row.Q3),
+                parseVal(row.Q4)
             ];
             csvContent += rowData.join(",") + "\n";
         });
+
+        const filterDescription = isFilterActive && filterIndicator && !isNaN(thresholdNum) && thresholdNum > 0
+            ? `Filtered (${filterIndicator} >= ${thresholdNum})`
+            : 'All entities';
+
         loadCsvData(csvContent, 0, [], 'csv', `${unitName}_Quartiles`, {
             originType: 'incites',
             unitName: unitName,
-            subView: 'Quartiles (Q1-Q4)',
+            subView: `Quartiles Q1-Q4 (${finalRows.length} entities)`,
             indicatorsCount: 4,
             indicatorsList: ['Q1', 'Q2', 'Q3', 'Q4'],
-            smoothingInfo: 'RAW'
+            smoothingInfo: `${filterDescription} | ${limitTop50 ? 'Max 50' : 'Unbounded'}`
         });
         setConfig({ method: 'batch', init: 'pca' });
         setActiveTab('multidimensional');
-    };
-
-    const parseVal = (raw: any) => {
-        if (typeof raw === 'number') return isNaN(raw) ? 0 : raw;
-        if (typeof raw === 'string') return parseFloat(raw.replace('%', '').replace(',', '.').trim()) || 0;
-        return 0;
     };
 
     const bubbleChartData = useMemo(() => {
@@ -453,28 +575,58 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
     }, [activeProfile, selectedChartEntities, bubbleIndX, bubbleIndY, bubbleIndSize, bubbleIndColor]);
 
     const handleTrainSOMBubble = () => {
-        if (!bubbleChartData.points || bubbleChartData.points.length === 0) {
-            alert("No bubble chart data available to train SOM.");
+        if (!unit || !activeProfile || activeProfile.length === 0) {
+            alert("No profile data available to train SOM.");
             return;
         }
-        const indicators = [bubbleIndX, bubbleIndY, bubbleIndSize, bubbleIndColor];
-        const uniqueInds = Array.from(new Set(indicators));
-        let csvContent = "Entity," + uniqueInds.join(",") + "\n";
-        
-        const activeProfileMap = new Map(activeProfile.map((r: any) => [String(r.entity), r]));
-        
-        bubbleChartData.points.forEach((p: any) => {
-            const origRow = activeProfileMap.get(p.entity) as Record<string, any> | undefined;
-            if (origRow) {
-                const rowData = [
-                    `"${p.entity}"`,
-                    ...uniqueInds.map(ind => parseVal(origRow[ind]))
-                ];
-                csvContent += rowData.join(",") + "\n";
-            }
+        const rawIndicators = [bubbleIndX, bubbleIndY, bubbleIndSize, bubbleIndColor];
+        if (rawIndicators.some(ind => !ind)) {
+            alert("Please select all 4 indicators for the 4D Bubble Chart.");
+            return;
+        }
+
+        // 1. Filter entities from activeProfile using the active threshold filter
+        let candidateRows = [...activeProfile];
+        const thresholdNum = parseFloat(String(filterMinValue));
+        if (isFilterActive && filterIndicator && !isNaN(thresholdNum) && thresholdNum > 0) {
+            candidateRows = candidateRows.filter((r: any) => parseVal(r[filterIndicator]) >= thresholdNum);
+        }
+
+        if (candidateRows.length === 0) {
+            alert(`No entities match the filter criteria (${filterIndicator} >= ${filterMinValue}).`);
+            return;
+        }
+
+        // 2. Apply Max 50 limit if enabled
+        const finalRows = limitTop50 ? candidateRows.slice(0, 50) : candidateRows;
+
+        // Disambiguate column names if two dropdowns have the same indicator name
+        const colNames = rawIndicators.map((ind, idx) => {
+            const prevCount = rawIndicators.slice(0, idx).filter(x => x === ind).length;
+            return prevCount > 0 ? `${ind} (${idx === 1 ? 'Y' : idx === 2 ? 'Size' : 'Color'})` : ind;
         });
-        
-        loadCsvData(csvContent, 0, [], 'csv');
+
+        let csvContent = "Entity," + colNames.join(",") + "\n";
+        finalRows.forEach((row: any) => {
+            const rowData = [
+                `"${row.entity}"`,
+                ...rawIndicators.map(ind => parseVal(row[ind]))
+            ];
+            csvContent += rowData.join(",") + "\n";
+        });
+
+        const filterDescription = isFilterActive && filterIndicator && !isNaN(thresholdNum) && thresholdNum > 0
+            ? `Filtered (${filterIndicator} >= ${thresholdNum})`
+            : 'All entities';
+
+        loadCsvData(csvContent, 0, [], 'csv', `${unitName}_4DBubble`, {
+            originType: 'incites',
+            unitName: unitName,
+            subView: `4D Bubble Chart (${finalRows.length} entities)`,
+            indicatorsCount: 4,
+            indicatorsList: colNames,
+            smoothingInfo: `${filterDescription} | ${limitTop50 ? 'Max 50' : 'Unbounded'}`
+        });
         setConfig({ method: 'batch', init: 'pca' });
         setActiveTab('multidimensional');
     };
@@ -763,15 +915,39 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                     {/* Tab Content */}
                     <div className="flex flex-col flex-1 space-y-4 p-4 overflow-y-auto">
 
-                        {/* ── GLOBAL CHART ENTITIES SELECTOR ───────────────────── */}
+                        {/* ── 1. PERIOD TOGGLE (Top-most control) ──────────────── */}
+                        {sidebarTab === 'profiles' && (
+                            <div className="flex items-center space-x-3 p-3 bg-gray-950 rounded-xl border border-gray-800">
+                                <input
+                                    type="checkbox"
+                                    id="useRecentData"
+                                    className="w-4 h-4 text-indigo-600 bg-gray-900 border-gray-700 rounded focus:ring-indigo-600 focus:ring-2 cursor-pointer"
+                                    checked={useRecent}
+                                    onChange={(e) => setUseRecent(e.target.checked)}
+                                    disabled={!hasRecentData}
+                                />
+                                <div>
+                                    <label htmlFor="useRecentData" className={`text-sm font-bold block ${hasRecentData ? 'text-gray-200 cursor-pointer' : 'text-gray-600 cursor-not-allowed'}`}>
+                                        Use 2021-2025 Data
+                                    </label>
+                                    <p className="text-[10px] text-gray-500">
+                                        {hasRecentData ? 'Applies to Profile, Quartiles, and Sunburst.' : 'No 2021-2025 file uploaded.'}
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ── 2. GLOBAL CHART ENTITIES SELECTOR ───────────────────── */}
                         <div className="bg-gray-950 p-3 rounded-xl border border-gray-800">
                             <button
                                 onClick={() => setIsEntityExpanded(!isEntityExpanded)}
-                                className="w-full flex items-center justify-between text-left group bg-transparent border-0"
+                                className="w-full flex items-center justify-between text-left group bg-transparent border-0 cursor-pointer"
                             >
                                 <div>
                                     <h3 className="text-sm font-bold text-gray-200 group-hover:text-blue-400 transition-colors">Chart Entities</h3>
-                                    <p className="text-[10px] text-gray-500">{selectedChartEntities.length} selected</p>
+                                    <p className="text-[10px] text-gray-400">
+                                        <span className="text-blue-400 font-bold">{selectedChartEntities.length} selected</span> (for charts & table)
+                                    </p>
                                 </div>
                                 {isEntityExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
                             </button>
@@ -832,85 +1008,212 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                             )}
                         </div>
 
-                        {/* ── PROFILES TAB ───────────────────────────── */}
+                        {/* ── 3. PROFILES TAB ───────────────────────────── */}
                         {sidebarTab === 'profiles' && (<>
-                            {/* Period Toggle */}
-                            <div className="flex items-center space-x-3 p-3 bg-gray-950 rounded-xl border border-gray-800">
-                                <input
-                                    type="checkbox"
-                                    id="useRecentData"
-                                    className="w-4 h-4 text-indigo-600 bg-gray-900 border-gray-700 rounded focus:ring-indigo-600 focus:ring-2"
-                                    checked={useRecent}
-                                    onChange={(e) => setUseRecent(e.target.checked)}
-                                    disabled={!hasRecentData}
-                                />
-                                <div>
-                                    <label htmlFor="useRecentData" className={`text-sm font-bold block ${hasRecentData ? 'text-gray-200 cursor-pointer' : 'text-gray-600 cursor-not-allowed'}`}>
-                                        Use 2021-2025 Data
-                                    </label>
-                                    <p className="text-[10px] text-gray-500">
-                                        {hasRecentData ? 'Applies to Profile, Quartiles, and Sunburst.' : 'No 2021-2025 file uploaded.'}
-                                    </p>
-                                </div>
-                            </div>
-
-                            {/* Indicator Selector */}
-                            <div>
+                            {/* Multidimensional Profile Expander (Indicators + Filter for SOM) */}
+                            <div className="bg-gray-950 p-3 rounded-xl border border-gray-800">
                                 <button
                                     onClick={() => setIsProfileExpanded(!isProfileExpanded)}
-                                    className="w-full flex items-center justify-between text-left group mb-2 bg-transparent border-0"
+                                    className="w-full flex items-center justify-between text-left group bg-transparent border-0 cursor-pointer"
                                 >
                                     <div>
-                                        <h3 className="text-sm font-bold text-gray-200 group-hover:text-indigo-400 transition-colors">Multidimensional Profile</h3>
-                                        <p className="text-xs text-gray-500">Select indicators for the profile table and SOM export.</p>
+                                        <h3 className="text-sm font-bold text-gray-200 group-hover:text-indigo-400 transition-colors flex items-center space-x-2">
+                                            <span>Multidimensional Profile</span>
+                                            {isFilterActive && filterMinValue !== '' && Number(filterMinValue) > 0 && (
+                                                <span className="px-1.5 py-0.5 bg-indigo-950 text-indigo-300 border border-indigo-500/50 text-[9px] font-bold rounded">
+                                                    ≥ {filterMinValue}
+                                                </span>
+                                            )}
+                                        </h3>
+                                        <p className="text-[10px] text-gray-500">Select indicators & filter units for SOM.</p>
                                     </div>
                                     {isProfileExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
                                 </button>
 
                                 {isProfileExpanded && (
-                                    <div className="max-h-48 overflow-y-auto space-y-1 pr-2 mt-3 bg-gray-950 p-2 rounded-xl border border-gray-800">
-                                        {unit.indicators?.map((ind: string) => (
-                                            <button
-                                                key={ind}
-                                                onClick={() => toggleProfileIndicator(ind)}
-                                                className={`flex items-center space-x-2 text-xs w-full text-left p-1.5 rounded transition border-0 ${selectedProfileIndicators.includes(ind)
-                                                        ? 'bg-gray-800 hover:bg-gray-800'
-                                                        : 'bg-transparent hover:bg-gray-800'
-                                                    }`}
-                                            >
-                                                {selectedProfileIndicators.includes(ind)
-                                                    ? <CheckSquare className="w-4 h-4 text-indigo-400 shrink-0" />
-                                                    : <Square className="w-4 h-4 text-gray-600 shrink-0" />
-                                                }
-                                                <span className={`truncate ${selectedProfileIndicators.includes(ind) ? 'text-gray-200' : 'text-gray-500'}`} title={ind}>
-                                                    {ind}
-                                                </span>
-                                            </button>
-                                        ))}
+                                    <div className="mt-3 space-y-3 pt-3 border-t border-gray-800/50">
+                                        {/* Indicators Checkboxes */}
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider block">
+                                                Profile Indicators ({selectedProfileIndicators.length} selected)
+                                            </label>
+                                            <div className="max-h-44 overflow-y-auto space-y-1 pr-1 bg-gray-900 p-1.5 rounded-lg border border-gray-800 custom-scrollbar">
+                                                {unit.indicators?.map((ind: string) => (
+                                                    <button
+                                                        key={ind}
+                                                        onClick={() => toggleProfileIndicator(ind)}
+                                                        className={`flex items-center space-x-2 text-xs w-full text-left p-1.5 rounded transition border-0 cursor-pointer ${selectedProfileIndicators.includes(ind)
+                                                                ? 'bg-gray-800 text-gray-200'
+                                                                : 'bg-transparent hover:bg-gray-800 text-gray-400'
+                                                            }`}
+                                                    >
+                                                        {selectedProfileIndicators.includes(ind)
+                                                            ? <CheckSquare className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                                                            : <Square className="w-3.5 h-3.5 text-gray-600 shrink-0" />
+                                                        }
+                                                        <span className="truncate" title={ind}>{ind}</span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Filter Units for SOM Controls (Nested inside Expander) */}
+                                        <div className="bg-gray-900/90 p-3 rounded-xl border border-gray-800 space-y-2.5 shadow-inner">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center space-x-2">
+                                                    <div className="p-1 bg-indigo-950 border border-indigo-500/50 rounded text-indigo-400">
+                                                        <Filter className="w-3 h-3" />
+                                                    </div>
+                                                    <h4 className="text-[11px] font-bold text-gray-200 uppercase tracking-wider">Filter Units for SOM</h4>
+                                                </div>
+                                                {isFilterActive && filterMinValue !== '' && Number(filterMinValue) > 0 && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setIncitesState({ incitesFilterMinValue: '', incitesIsFilterActive: false })}
+                                                        className="text-[10px] text-red-400 hover:text-red-300 font-bold underline cursor-pointer"
+                                                    >
+                                                        Clear
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            {/* Filter Indicator Dropdown */}
+                                            <div className="space-y-1">
+                                                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Filter Indicator:</label>
+                                                <select
+                                                    value={filterIndicator}
+                                                    onChange={(e) => setIncitesState({ incitesFilterIndicator: e.target.value })}
+                                                    className="w-full bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded-lg px-2 py-1 text-[11px] text-gray-200 focus:outline-none cursor-pointer truncate"
+                                                >
+                                                    {unit.indicators?.map((ind: string) => (
+                                                        <option key={ind} value={ind}>{ind}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+
+                                            {/* Minimum Threshold Input & Presets */}
+                                            <div className="space-y-1.5">
+                                                <div className="flex items-center justify-between">
+                                                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Minimum Threshold (≥):</label>
+                                                    {matchingFilterCount !== undefined && (
+                                                        <span className="text-[10px] font-mono font-bold text-emerald-400">
+                                                            {matchingFilterCount} / {activeProfile?.length || 0} units
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <input
+                                                    type="number"
+                                                    step="any"
+                                                    min="0"
+                                                    placeholder="e.g. 10"
+                                                    value={filterMinValue}
+                                                    onChange={(e) => {
+                                                        const val = e.target.value;
+                                                        const hasVal = val !== '' && Number(val) > 0;
+                                                        setIncitesState({
+                                                            incitesFilterMinValue: val,
+                                                            incitesIsFilterActive: hasVal,
+                                                            incitesLimitTop50: hasVal ? false : limitTop50
+                                                        });
+                                                    }}
+                                                    className="w-full bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded-lg px-2 py-1 text-xs text-white font-mono focus:outline-none"
+                                                />
+
+                                                {/* Quick Presets */}
+                                                <div className="flex items-center space-x-1 pt-0.5 flex-wrap gap-y-1">
+                                                    <span className="text-[9px] text-gray-500 font-bold uppercase mr-1">Presets:</span>
+                                                    {[5, 10, 25, 50, 100].map((val) => (
+                                                        <button
+                                                            key={val}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setIncitesState({
+                                                                    incitesFilterMinValue: val,
+                                                                    incitesIsFilterActive: true,
+                                                                    incitesLimitTop50: false
+                                                                });
+                                                            }}
+                                                            className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition border cursor-pointer ${
+                                                                Number(filterMinValue) === val
+                                                                    ? 'bg-indigo-600 text-white border-indigo-500'
+                                                                    : 'bg-gray-950 hover:bg-gray-800 text-gray-300 border-gray-700'
+                                                            }`}
+                                                        >
+                                                            ≥ {val}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
                             </div>
 
                             {/* Heatmap Matrix Card */}
                             {heatmapMatrixData.rows.length > 0 && (
-                                <div className="bg-gray-950 border border-gray-800 rounded-2xl overflow-hidden mt-3">
-                                    <div className="p-3 border-b border-gray-800 flex items-center justify-between gap-2">
+                                <div className="bg-gray-950 border border-gray-800 rounded-2xl overflow-hidden mt-3 relative">
+                                    <div className="p-3 border-b border-gray-800 flex items-center justify-between gap-3 flex-wrap">
                                         <div>
-                                            <h3 className="text-sm font-bold text-gray-200 flex items-center space-x-2">
+                                            <h3 className="text-sm font-bold text-gray-200 flex items-center space-x-2 flex-wrap gap-1">
                                                 <span>Heatmap Matrix</span>
-                                                <span className="text-gray-500 font-normal text-xs">({heatmapMatrixData.rows.length} entities)</span>
+                                                <span className="text-gray-500 font-normal text-xs">
+                                                    ({heatmapMatrixData.rows.length} entities)
+                                                </span>
+                                                {isFilterActive && filterMinValue !== '' && Number(filterMinValue) > 0 && (
+                                                    <span className="px-2 py-0.5 bg-indigo-950/80 border border-indigo-500/60 text-indigo-300 text-[10px] font-bold rounded-lg flex items-center space-x-1">
+                                                        <Filter className="w-2.5 h-2.5" />
+                                                        <span className="truncate max-w-[150px]">{filterIndicator} ≥ {filterMinValue}</span>
+                                                    </span>
+                                                )}
                                             </h3>
                                             <p className="text-[10px] text-gray-400 font-medium">Min-Max column normalization [0 to 1].</p>
                                         </div>
-                                        <button
-                                            onClick={handleTrainSOM}
-                                            disabled={selectedProfileIndicators.length === 0}
-                                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-900/40 transition-all flex items-center space-x-1.5 shrink-0"
-                                        >
-                                            <Activity className="w-3.5 h-3.5" />
-                                            <span>Train SOM</span>
-                                        </button>
+
+                                        {/* SOM Training Controls: Filter + Max 50 Checkbox + Train SOM Button */}
+                                        <div className="flex items-center space-x-2 flex-wrap gap-y-2">
+                                            {/* Filter Trigger Button */}
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsFilterModalOpen(true)}
+                                                className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center space-x-1.5 cursor-pointer ${
+                                                    isFilterActive && filterMinValue !== '' && Number(filterMinValue) > 0
+                                                        ? 'bg-indigo-900/60 text-indigo-300 border-indigo-500/80 shadow-md shadow-indigo-950'
+                                                        : 'bg-gray-900 hover:bg-gray-800 text-gray-300 border-gray-700 hover:border-gray-600'
+                                                }`}
+                                                title="Filter entities by minimum threshold on any indicator (e.g. Web of Science Documents >= 10)"
+                                            >
+                                                <Filter className="w-3.5 h-3.5" />
+                                                <span>{isFilterActive && filterMinValue !== '' && Number(filterMinValue) > 0 ? `Filter: ≥ ${filterMinValue}` : 'Filter Units'}</span>
+                                            </button>
+
+                                            {/* Limit Top 50 Checkbox */}
+                                            <label 
+                                                className="flex items-center space-x-1.5 text-xs text-gray-300 cursor-pointer select-none bg-gray-900/80 px-2.5 py-1.5 rounded-xl border border-gray-800 hover:border-gray-700" 
+                                                title="Send at most 50 entities to Train SOM (Default: Active)"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={limitTop50}
+                                                    onChange={(e) => setIncitesState({ incitesLimitTop50: e.target.checked })}
+                                                    className="w-3.5 h-3.5 bg-gray-950 border-gray-700 rounded text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900 cursor-pointer"
+                                                />
+                                                <span className="font-semibold text-gray-200 text-[11px]">Max 50</span>
+                                            </label>
+
+                                            {/* Train SOM Button */}
+                                            <button
+                                                type="button"
+                                                onClick={handleTrainSOM}
+                                                disabled={selectedProfileIndicators.length === 0}
+                                                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-900/40 transition-all flex items-center space-x-1.5 shrink-0 cursor-pointer"
+                                                title={`Train SOM with ${limitTop50 ? 'up to 50' : 'all'} filtered entities`}
+                                            >
+                                                <Activity className="w-3.5 h-3.5" />
+                                                <span>Train SOM</span>
+                                            </button>
+                                        </div>
                                     </div>
+
                                     <div className="overflow-x-auto max-h-72 custom-scrollbar">
                                         <table className="w-full text-[10px] border-collapse">
                                             <thead className="sticky top-0 bg-gray-950 border-b border-gray-800 shadow-sm">
@@ -952,6 +1255,8 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                     </div>
                                 </div>
                             )}
+
+
                         </>)}
 
                         {/* ── TEMPORAL ANALYSIS TAB ─────────────────── */}
@@ -960,15 +1265,15 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                 {/* Header row: title + Hide zeros */}
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <h3 className="text-sm font-bold text-gray-200">Temporal Analysis</h3>
-                                        <p className="text-[10px] text-gray-500">{filteredEvoData.length} rows</p>
+                                        <h3 className="text-sm font-bold text-gray-200">Temporal Smoothing</h3>
+                                        <p className="text-[10px] text-gray-500">{filteredEvoData.length} active trajectory rows</p>
                                     </div>
                                     <label className="flex items-center space-x-1.5 cursor-pointer" title="Hide rows where all selected indicators are zero">
                                         <input
                                             type="checkbox"
                                             checked={filterEvoZeros}
                                             onChange={e => setFilterEvoZeros(e.target.checked)}
-                                            className="w-3.5 h-3.5 text-indigo-600 bg-gray-900 border-gray-700 rounded focus:ring-indigo-600"
+                                            className="w-3.5 h-3.5 text-indigo-600 bg-gray-900 border-gray-700 rounded focus:ring-indigo-600 cursor-pointer"
                                         />
                                         <span className="text-[10px] text-gray-400 whitespace-nowrap">Hide zeros</span>
                                     </label>
@@ -980,13 +1285,81 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                         <button
                                             key={mode}
                                             onClick={() => setEvolutionSmoothing(mode)}
-                                            className={`px-2 py-1 text-[10px] font-medium rounded transition-colors ${
-                                                evolutionSmoothing === mode ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                                            className={`px-2 py-1 text-[10px] font-bold rounded-lg transition-colors cursor-pointer ${
+                                                evolutionSmoothing === mode ? 'bg-indigo-600 text-white shadow' : 'bg-gray-900 text-gray-400 hover:bg-gray-800 border border-gray-800'
                                             }`}
                                         >
                                             {mode.toUpperCase()}
                                         </button>
                                     ))}
+                                </div>
+
+                                {/* ── TEMPORAL SOM ENTITIES SELECTOR (Ranked) ─────────── */}
+                                <div className="bg-gray-950 p-3 rounded-xl border border-gray-800 space-y-3 mt-2">
+                                    <button
+                                        onClick={() => setIsTemporalEntitiesExpanded(!isTemporalEntitiesExpanded)}
+                                        className="w-full flex items-center justify-between text-left group bg-transparent border-0 cursor-pointer"
+                                    >
+                                        <div>
+                                            <h3 className="text-sm font-bold text-gray-200 group-hover:text-purple-400 transition-colors flex items-center space-x-2">
+                                                <span>Temporal SOM Entities</span>
+                                                <span className="px-1.5 py-0.5 bg-purple-950 text-purple-300 border border-purple-500/50 text-[9px] font-bold rounded">
+                                                    {temporalSelectedEntities.length} entities
+                                                </span>
+                                            </h3>
+                                            <p className="text-[10px] text-gray-500">{filteredEvoData.length} trajectory rows in total</p>
+                                        </div>
+                                        {isTemporalEntitiesExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+                                    </button>
+
+                                    {isTemporalEntitiesExpanded && (
+                                        <div className="space-y-3 pt-2 border-t border-gray-800/50">
+                                            {/* Quick Limit Buttons */}
+                                            <div className="flex flex-col space-y-1">
+                                                <label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Top Entities (Temporal Rank)</label>
+                                                <div className="flex space-x-1">
+                                                    {([3, 4, 5, 10, 'all'] as const).map(lim => (
+                                                        <button
+                                                            key={lim}
+                                                            type="button"
+                                                            onClick={() => setTemporalEntityLimit(lim)}
+                                                            className={`flex-1 py-1 text-[10px] rounded-lg transition-colors font-medium border cursor-pointer ${
+                                                                temporalEntityLimit === lim
+                                                                    ? 'bg-purple-900/70 text-purple-300 border-purple-500 shadow-sm'
+                                                                    : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'
+                                                            }`}
+                                                        >
+                                                            {lim === 'all' ? 'All' : `Top ${lim}`}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* Entity Selection Checklist */}
+                                            <div className="flex flex-col space-y-1">
+                                                <label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Select Entities (Ranked)</label>
+                                                <div className="max-h-48 overflow-y-auto pr-1 space-y-1 custom-scrollbar bg-gray-900 rounded-lg p-1.5 border border-gray-800">
+                                                    {evoUniqueEntities.map((ent: string, idx: number) => (
+                                                        <button
+                                                            key={ent}
+                                                            type="button"
+                                                            onClick={() => toggleTemporalEntity(ent)}
+                                                            className={`flex items-center space-x-2 text-[11px] w-full text-left p-1.5 rounded transition border-0 cursor-pointer ${
+                                                                temporalSelectedEntities.includes(ent) ? 'bg-purple-600/20 text-gray-200' : 'hover:bg-gray-800 text-gray-500'
+                                                            }`}
+                                                        >
+                                                            {temporalSelectedEntities.includes(ent)
+                                                                ? <CheckSquare size={12} className="text-purple-400 shrink-0" />
+                                                                : <Square size={12} className="opacity-50 shrink-0" />
+                                                            }
+                                                            <span className="text-[10px] text-gray-500 font-mono w-4 shrink-0">{idx + 1}.</span>
+                                                            <span className="truncate" title={ent}>{ent}</span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </>) : (
                                 <div className="flex flex-col items-center justify-center h-40 text-center text-gray-600">
@@ -1235,22 +1608,48 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                             {/* ── TEMPORAL HEATMAP MATRIX ─────────────────────────────────── */}
                             {temporalHeatmapMatrixData.rows.length > 0 && (
                                 <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 flex flex-col space-y-3">
-                                    <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-gray-800">
+                                    <div className="flex items-center justify-between flex-wrap gap-3 pb-3 border-b border-gray-800">
                                         <div>
-                                            <h3 className="text-sm font-bold text-gray-200 flex items-center space-x-2">
+                                            <h3 className="text-sm font-bold text-gray-200 flex items-center space-x-2 flex-wrap gap-1">
                                                 <span>Temporal Heatmap Matrix</span>
-                                                <span className="text-gray-500 font-normal text-xs">({temporalHeatmapMatrixData.rows.length} rows)</span>
+                                                <span className="px-2 py-0.5 bg-purple-950/80 border border-purple-500/60 text-purple-300 text-[10px] font-bold rounded-lg">
+                                                    {temporalSelectedEntities.length} entities · {filteredEvoData.length} trajectory rows
+                                                </span>
                                             </h3>
                                             <p className="text-[11px] text-gray-500">Min-Max column normalization [0 to 1] per entity across indicator series.</p>
                                         </div>
-                                        <button
-                                            onClick={handleTrainSOMEvo}
-                                            disabled={selectedProfileIndicators.length === 0}
-                                            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-900/40 transition-all flex items-center space-x-1.5 shrink-0"
-                                        >
-                                            <Activity className="w-3.5 h-3.5" />
-                                            <span>Train SOM</span>
-                                        </button>
+
+                                        <div className="flex items-center space-x-2 flex-wrap gap-y-2">
+                                            {/* Quick Top N limit buttons */}
+                                            <div className="flex items-center space-x-1 bg-gray-950 p-1 rounded-xl border border-gray-800">
+                                                <span className="text-[10px] text-gray-500 font-semibold px-1.5">Entities:</span>
+                                                {([3, 4, 5, 10, 'all'] as const).map(lim => (
+                                                    <button
+                                                        key={lim}
+                                                        type="button"
+                                                        onClick={() => setTemporalEntityLimit(lim)}
+                                                        className={`px-2 py-0.5 text-[10px] font-bold rounded-lg transition-all cursor-pointer ${
+                                                            temporalEntityLimit === lim
+                                                                ? 'bg-purple-600 text-white shadow'
+                                                                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
+                                                        }`}
+                                                    >
+                                                        {lim === 'all' ? 'All' : `Top ${lim}`}
+                                                    </button>
+                                                ))}
+                                            </div>
+
+                                            <button
+                                                type="button"
+                                                onClick={handleTrainSOMEvo}
+                                                disabled={selectedProfileIndicators.length === 0 || filteredEvoData.length === 0}
+                                                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-900/40 transition-all flex items-center space-x-1.5 shrink-0 cursor-pointer"
+                                                title={`Train SOM with all ${filteredEvoData.length} trajectory rows from ${temporalSelectedEntities.length} entities`}
+                                            >
+                                                <Activity className="w-3.5 h-3.5" />
+                                                <span>Train SOM ({filteredEvoData.length} rows)</span>
+                                            </button>
+                                        </div>
                                     </div>
 
                                     <div className="overflow-x-auto max-h-[450px] custom-scrollbar rounded-xl border border-gray-800">
@@ -1306,14 +1705,20 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                     {/* Card Header & Indicator Selectors */}
                                     <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-3 border-b border-gray-800">
                                         <div>
-                                            <h3 className="text-sm font-bold text-gray-200 flex items-center space-x-2">
+                                            <h3 className="text-sm font-bold text-gray-200 flex items-center space-x-2 flex-wrap gap-1">
                                                 <span>4D Bubble Chart Analysis</span>
                                                 <span className="text-gray-500 font-normal text-xs">({bubbleChartData.points.length} entities)</span>
+                                                {isFilterActive && filterMinValue !== '' && Number(filterMinValue) > 0 && (
+                                                    <span className="px-2 py-0.5 bg-indigo-950/80 border border-indigo-500/60 text-indigo-300 text-[10px] font-bold rounded-lg flex items-center space-x-1">
+                                                        <Filter className="w-2.5 h-2.5" />
+                                                        <span className="truncate max-w-[150px]">{filterIndicator} ≥ {filterMinValue}</span>
+                                                    </span>
+                                                )}
                                             </h3>
                                             <p className="text-[11px] text-gray-500">Configure 4 distinct indicators for X, Y, Size, and Color.</p>
                                         </div>
                                         
-                                        <div className="flex items-center space-x-3">
+                                        <div className="flex items-center space-x-2.5 flex-wrap gap-y-2">
                                             <ExportButtons
                                                 containerId="chart-4d-bubble"
                                                 filename="4d_bubble_chart"
@@ -1329,7 +1734,7 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                                     ).join('\n')
                                                 }
                                             />
-                                            <label className="flex items-center space-x-1.5 cursor-pointer text-xs text-gray-300">
+                                            <label className="flex items-center space-x-1.5 cursor-pointer text-xs text-gray-300 mr-1">
                                                 <input
                                                     type="checkbox"
                                                     checked={showBubbleLabels}
@@ -1338,10 +1743,41 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                                 />
                                                 <span>Show Labels</span>
                                             </label>
+
+                                            {/* Filter Trigger Button */}
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsFilterModalOpen(true)}
+                                                className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center space-x-1.5 cursor-pointer ${
+                                                    isFilterActive && filterMinValue !== '' && Number(filterMinValue) > 0
+                                                        ? 'bg-indigo-900/60 text-indigo-300 border-indigo-500/80 shadow-md shadow-indigo-950'
+                                                        : 'bg-gray-950 hover:bg-gray-800 text-gray-300 border-gray-800 hover:border-gray-700'
+                                                }`}
+                                                title="Filter entities by minimum threshold on any indicator"
+                                            >
+                                                <Filter className="w-3.5 h-3.5" />
+                                                <span>{isFilterActive && filterMinValue !== '' && Number(filterMinValue) > 0 ? `Filter: ≥ ${filterMinValue}` : 'Filter Units'}</span>
+                                            </button>
+
+                                            {/* Limit Top 50 Checkbox */}
+                                            <label 
+                                                className="flex items-center space-x-1.5 text-xs text-gray-300 cursor-pointer select-none bg-gray-950 px-2.5 py-1.5 rounded-xl border border-gray-800 hover:border-gray-700" 
+                                                title="Send at most 50 entities to Train SOM (Default: Active)"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={limitTop50}
+                                                    onChange={(e) => setIncitesState({ incitesLimitTop50: e.target.checked })}
+                                                    className="w-3.5 h-3.5 bg-gray-950 border-gray-700 rounded text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900 cursor-pointer"
+                                                />
+                                                <span className="font-semibold text-gray-200 text-[11px]">Max 50</span>
+                                            </label>
                                             
                                             <button
+                                                type="button"
                                                 onClick={handleTrainSOMBubble}
-                                                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-900/30 transition-all flex items-center space-x-1.5"
+                                                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-900/30 transition-all flex items-center space-x-1.5 cursor-pointer shrink-0"
+                                                title={`Train SOM with 4 dimensions (${limitTop50 ? 'up to 50' : 'all'} filtered entities)`}
                                             >
                                                 <Activity className="w-3.5 h-3.5" />
                                                 <span>Train SOM</span>
@@ -1621,12 +2057,20 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                             {/* Quartiles Chart */}
                             {quartileChartData && quartileChartData.length > 0 ? (
                                 <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 flex flex-col">
-                                    <div className="flex items-center justify-between mb-4">
-                                        <h3 className="text-sm font-bold text-gray-200">
-                                            Quartile Distribution (Q1–Q4)
-                                            <span className="text-gray-500 ml-2 font-normal text-xs">({quartileChartData.length} entities)</span>
-                                        </h3>
-                                        <div className="flex items-center space-x-2">
+                                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                                        <div>
+                                            <h3 className="text-sm font-bold text-gray-200 flex items-center space-x-2 flex-wrap gap-1">
+                                                <span>Quartile Distribution (Q1–Q4)</span>
+                                                <span className="text-gray-500 font-normal text-xs">({quartileChartData.length} entities)</span>
+                                                {isFilterActive && filterMinValue !== '' && Number(filterMinValue) > 0 && (
+                                                    <span className="px-2 py-0.5 bg-indigo-950/80 border border-indigo-500/60 text-indigo-300 text-[10px] font-bold rounded-lg flex items-center space-x-1">
+                                                        <Filter className="w-2.5 h-2.5" />
+                                                        <span className="truncate max-w-[150px]">{filterIndicator} ≥ {filterMinValue}</span>
+                                                    </span>
+                                                )}
+                                            </h3>
+                                        </div>
+                                        <div className="flex items-center space-x-2 flex-wrap gap-y-2">
                                             <ExportButtons
                                                 containerId="chart-quartile-distribution"
                                                 filename="quartile_distribution"
@@ -1641,9 +2085,41 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                                     ).join('\n')
                                                 }
                                             />
+
+                                            {/* Filter Trigger Button */}
                                             <button
+                                                type="button"
+                                                onClick={() => setIsFilterModalOpen(true)}
+                                                className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center space-x-1.5 cursor-pointer ${
+                                                    isFilterActive && filterMinValue !== '' && Number(filterMinValue) > 0
+                                                        ? 'bg-indigo-900/60 text-indigo-300 border-indigo-500/80 shadow-md shadow-indigo-950'
+                                                        : 'bg-gray-950 hover:bg-gray-800 text-gray-300 border-gray-800 hover:border-gray-700'
+                                                }`}
+                                                title="Filter entities by minimum threshold on any indicator"
+                                            >
+                                                <Filter className="w-3.5 h-3.5" />
+                                                <span>{isFilterActive && filterMinValue !== '' && Number(filterMinValue) > 0 ? `Filter: ≥ ${filterMinValue}` : 'Filter Units'}</span>
+                                            </button>
+
+                                            {/* Limit Top 50 Checkbox */}
+                                            <label 
+                                                className="flex items-center space-x-1.5 text-xs text-gray-300 cursor-pointer select-none bg-gray-950 px-2.5 py-1.5 rounded-xl border border-gray-800 hover:border-gray-700" 
+                                                title="Send at most 50 entities to Train SOM (Default: Active)"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={limitTop50}
+                                                    onChange={(e) => setIncitesState({ incitesLimitTop50: e.target.checked })}
+                                                    className="w-3.5 h-3.5 bg-gray-950 border-gray-700 rounded text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900 cursor-pointer"
+                                                />
+                                                <span className="font-semibold text-gray-200 text-[11px]">Max 50</span>
+                                            </label>
+
+                                            <button
+                                                type="button"
                                                 onClick={handleTrainSOMQuartiles}
-                                                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-900/30 transition-all flex items-center space-x-1.5"
+                                                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-900/30 transition-all flex items-center space-x-1.5 cursor-pointer shrink-0"
+                                                title={`Train SOM with Q1-Q4 (${limitTop50 ? 'up to 50' : 'all'} filtered entities)`}
                                             >
                                                 <Activity className="w-3.5 h-3.5" />
                                                 <span>Train SOM</span>
@@ -1831,6 +2307,146 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                     top_20_entidades: unit.profile?.slice(0, 20) || []
                 }}
             />
+
+            {/* ── GLOBAL FILTER UNITS MODAL DIALOG (Rendered directly via Portal to body) ── */}
+            {isFilterModalOpen && typeof document !== 'undefined' && createPortal(
+                <div className="fixed inset-0 z-[999999] bg-gray-950/85 backdrop-blur-xs flex items-center justify-center p-4">
+                    <div className="bg-gray-900 border border-gray-800 w-full max-w-md rounded-2xl p-5 shadow-2xl flex flex-col space-y-4 animate-in fade-in zoom-in-95 duration-150 relative z-[999999]">
+                        {/* Header */}
+                        <div className="flex items-center justify-between border-b border-gray-800 pb-3">
+                            <div className="flex items-center space-x-2.5">
+                                <div className="p-2 bg-indigo-950/80 border border-indigo-500/50 rounded-xl text-indigo-400 shadow-inner">
+                                    <Filter className="w-4 h-4" />
+                                </div>
+                                <div>
+                                    <h3 className="text-sm font-black text-gray-200 uppercase tracking-wider">
+                                        Filter Units for SOM
+                                    </h3>
+                                    <p className="text-[10px] text-gray-400">
+                                        Select indicator and minimum threshold to filter before SOM training.
+                                    </p>
+                                </div>
+                            </div>
+                            <button 
+                                type="button"
+                                onClick={() => setIsFilterModalOpen(false)}
+                                className="text-gray-500 hover:text-gray-300 text-xs font-bold p-1 rounded-lg hover:bg-gray-800 cursor-pointer"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        {/* Indicator to filter by */}
+                        <div className="space-y-1.5">
+                            <label className="block text-[10px] font-bold uppercase text-gray-400 tracking-wider">
+                                Filter Indicator (from dataset):
+                            </label>
+                            <select
+                                value={filterIndicator}
+                                onChange={(e) => setIncitesState({ incitesFilterIndicator: e.target.value })}
+                                className="w-full bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-gray-200 focus:outline-none cursor-pointer"
+                            >
+                                {unit.indicators?.map((ind: string) => (
+                                    <option key={ind} value={ind}>{ind}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Minimum threshold input */}
+                        <div className="space-y-1.5">
+                            <label className="block text-[10px] font-bold uppercase text-gray-400 tracking-wider">
+                                Minimum Threshold (≥):
+                            </label>
+                            <input
+                                type="number"
+                                step="any"
+                                min="0"
+                                placeholder="e.g. 10"
+                                value={filterMinValue}
+                                onChange={(e) => setIncitesState({ incitesFilterMinValue: e.target.value })}
+                                className="w-full bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none"
+                            />
+                            {/* Quick Presets */}
+                            <div className="flex items-center space-x-1.5 pt-1 flex-wrap gap-y-1">
+                                <span className="text-[9px] text-gray-500 font-bold uppercase tracking-wider mr-1">Presets:</span>
+                                {[5, 10, 25, 50, 100].map((val) => (
+                                    <button
+                                        key={val}
+                                        type="button"
+                                        onClick={() => {
+                                            setIncitesState({
+                                                incitesFilterMinValue: val,
+                                                incitesIsFilterActive: true,
+                                                incitesLimitTop50: false // Automatically uncheck Max 50 on filter selection!
+                                            });
+                                        }}
+                                        className={`px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold transition border cursor-pointer ${
+                                            Number(filterMinValue) === val
+                                                ? 'bg-indigo-600 text-white border-indigo-500'
+                                                : 'bg-gray-950 hover:bg-gray-800 text-gray-300 border-gray-800'
+                                        }`}
+                                    >
+                                        ≥ {val}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Real-time Match Summary Card */}
+                        <div className="bg-gray-950/80 rounded-xl p-3 border border-gray-800/80 space-y-1.5 text-xs">
+                            <div className="flex items-center justify-between text-gray-400">
+                                <span>Total Entities:</span>
+                                <span className="font-mono font-bold text-gray-200">{activeProfile?.length ?? 0}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-indigo-300 font-semibold">
+                                <span>Matching Criteria (≥ {filterMinValue || 0}):</span>
+                                <span className="font-mono font-bold text-emerald-400">
+                                    {matchingFilterCount} units {activeProfile?.length ? `(${((matchingFilterCount / activeProfile.length) * 100).toFixed(0)}%)` : ''}
+                                </span>
+                            </div>
+                            <div className="flex items-center justify-between text-gray-400 border-t border-gray-800/60 pt-1.5 text-[11px]">
+                                <span>Sent to SOM {limitTop50 ? '(Max 50 limit)' : '(All matching)'}:</span>
+                                <span className="font-mono font-bold text-white">
+                                    {limitTop50 ? Math.min(matchingFilterCount, 50) : matchingFilterCount} units
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center space-x-2 pt-2 border-t border-gray-800">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setIncitesState({
+                                        incitesFilterMinValue: '',
+                                        incitesIsFilterActive: false
+                                    });
+                                    setIsFilterModalOpen(false);
+                                }}
+                                className="flex-1 px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold rounded-xl transition cursor-pointer"
+                            >
+                                Clear Filter
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const hasVal = filterMinValue !== '' && Number(filterMinValue) > 0;
+                                    setIncitesState({
+                                        incitesIsFilterActive: hasVal,
+                                        incitesLimitTop50: hasVal ? false : limitTop50 // Automatically uncheck Max 50 when active filter is applied!
+                                    });
+                                    setIsFilterModalOpen(false);
+                                }}
+                                className="flex-1 px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition cursor-pointer flex items-center justify-center space-x-1.5 shadow-lg shadow-indigo-950"
+                            >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Apply Filter</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>,
+                document.body
+            )}
         </div>
     );
 };
