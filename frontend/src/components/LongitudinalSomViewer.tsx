@@ -63,6 +63,22 @@ export const LongitudinalSomViewer: React.FC = () => {
     '#06b6d4', '#f97316', '#14b8a6', '#e11d48', '#84cc16'
   ], []);
 
+  // Hexagon math constants
+  const R = 1.0;
+  const apotema = Math.sqrt(3) / 2.0;
+
+  const getHexPolygonPoints = (xc: number, yc: number): string => {
+    const points = [
+      { x: xc + R, y: yc },
+      { x: xc + 0.5 * R, y: yc + apotema * R },
+      { x: xc - 0.5 * R, y: yc + apotema * R },
+      { x: xc - R, y: yc },
+      { x: xc - 0.5 * R, y: yc - apotema * R },
+      { x: xc + 0.5 * R, y: yc - apotema * R }
+    ];
+    return points.map(p => `${p.x.toFixed(3)},${p.y.toFixed(3)}`).join(' ');
+  };
+
   // Compute hex grid parameters
   const renderHexGrid = (mapData: any, highlightDrift = false, driftMetric?: any) => {
     if (!mapData?.hexGrid || mapData.hexGrid.length === 0) return null;
@@ -76,12 +92,12 @@ export const LongitudinalSomViewer: React.FC = () => {
     const maxDrift = driftMetric?.max_drift || 1;
 
     // SVG coordinate bounds
-    const xs = hexGrid.map((h: any) => h.x);
-    const ys = hexGrid.map((h: any) => h.y);
-    const minX = Math.min(...xs) - 30;
-    const maxX = Math.max(...xs) + 30;
-    const minY = Math.min(...ys) - 30;
-    const maxY = Math.max(...ys) + 30;
+    const xs = hexGrid.map((h: any) => h.x ?? 0);
+    const ys = hexGrid.map((h: any) => h.y ?? 0);
+    const minX = Math.min(...xs) - 1.5 * R;
+    const maxX = Math.max(...xs) + 1.5 * R;
+    const minY = Math.min(...ys) - 1.5 * apotema * R;
+    const maxY = Math.max(...ys) + 1.5 * apotema * R;
     const width = maxX - minX;
     const height = maxY - minY;
 
@@ -144,6 +160,7 @@ export const LongitudinalSomViewer: React.FC = () => {
           }
 
           const isSelected = selectedNeuron === idx;
+          const polyPoints = getHexPolygonPoints(hex.x, hex.y);
 
           return (
             <g
@@ -154,11 +171,11 @@ export const LongitudinalSomViewer: React.FC = () => {
             >
               {/* Hexagon Path */}
               <polygon
-                points={hex.vertices.map((v: any) => `${v.x},${v.y}`).join(' ')}
+                points={polyPoints}
                 fill={fillColor}
                 stroke={isSelected ? '#38bdf8' : strokeColor}
-                strokeWidth={isSelected ? 3 : 1.2}
-                className="transition-colors duration-300"
+                strokeWidth={isSelected ? 0.09 : 0.025}
+                className="transition-colors duration-150"
               />
 
               {/* Hit circle marker */}
@@ -166,11 +183,11 @@ export const LongitudinalSomViewer: React.FC = () => {
                 <circle
                   cx={hex.x}
                   cy={hex.y}
-                  r={Math.min(18, 4 + Math.sqrt(freq) * 3)}
+                  r={Math.min(0.5, 0.15 + Math.sqrt(freq) * 0.06)}
                   fill="#ffffff"
                   fillOpacity={0.25}
                   stroke="#ffffff"
-                  strokeWidth={1}
+                  strokeWidth={0.02}
                 />
               )}
 
@@ -178,14 +195,18 @@ export const LongitudinalSomViewer: React.FC = () => {
               {labels.length > 0 && (
                 <text
                   x={hex.x}
-                  y={hex.y + (freq > 0 ? 12 : 3)}
+                  y={hex.y + (freq > 0 ? 0.35 : 0.08)}
                   textAnchor="middle"
+                  dominantBaseline="middle"
                   fill="#f8fafc"
-                  fontSize="7.5"
+                  fontSize="0.22"
                   fontWeight="bold"
-                  className="pointer-events-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]"
+                  stroke="#050508"
+                  strokeWidth="0.03"
+                  paintOrder="stroke fill"
+                  className="pointer-events-none select-none tracking-tight"
                 >
-                  {labels[0].length > 12 ? `${labels[0].slice(0, 11)}…` : labels[0]}
+                  {labels[0].length > 14 ? `${labels[0].slice(0, 13)}…` : labels[0]}
                 </text>
               )}
 
@@ -193,12 +214,16 @@ export const LongitudinalSomViewer: React.FC = () => {
               {freq > 0 && (
                 <text
                   x={hex.x}
-                  y={hex.y - 3}
+                  y={hex.y - 0.15}
                   textAnchor="middle"
+                  dominantBaseline="middle"
                   fill="#38bdf8"
-                  fontSize="8.5"
+                  fontSize="0.28"
                   fontWeight="900"
-                  className="pointer-events-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]"
+                  stroke="#050508"
+                  strokeWidth="0.04"
+                  paintOrder="stroke fill"
+                  className="pointer-events-none select-none"
                 >
                   {freq}
                 </text>
@@ -207,11 +232,11 @@ export const LongitudinalSomViewer: React.FC = () => {
               {/* Highlight selection ring */}
               {isSelected && (
                 <polygon
-                  points={hex.vertices.map((v: any) => `${v.x},${v.y}`).join(' ')}
+                  points={polyPoints}
                   fill="none"
                   stroke="#38bdf8"
-                  strokeWidth={3}
-                  strokeDasharray="4 2"
+                  strokeWidth={0.09}
+                  strokeDasharray="0.1 0.05"
                 />
               )}
             </g>
