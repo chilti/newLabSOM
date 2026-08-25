@@ -254,9 +254,7 @@ export default function App() {
       relevanceRatio,
       windowSize
     );
-    if (temporal && windowSize >= 5) {
-      setBiblioMainView('longitudinal');
-    }
+    setBiblioMainView('network');
   };
 
   // Dynamic padding based on collapsed statebar

@@ -128,6 +128,67 @@ const getStorageKey = (projectId?: string | null) => {
   return `${STORAGE_PREFIX}${projectId || 'default'}`;
 };
 
+/**
+ * Safely persists reports to browser localStorage, automatically pruning heavy base64
+ * thumbnails when approaching the ~5MB quota limit so analysis calls never fail.
+ */
+const safePersistReport = (key: string, studyContext: StudyContext | null, entries: ReportEntry[]) => {
+  try {
+    // 1. Attempt standard full save
+    localStorage.setItem(key, JSON.stringify({ studyContext, entries }));
+    return;
+  } catch (e: any) {
+    console.warn('[aiStore] localStorage quota reached, pruning older thumbnails:', e?.message);
+  }
+
+  try {
+    // 2. Strip heavy base64 thumbnailPng from older entries (keep only newest)
+    const prunedEntries = entries.map((entry, idx) => {
+      if (idx === entries.length - 1) return entry;
+      return {
+        ...entry,
+        snapshot: {
+          ...entry.snapshot,
+          thumbnailPng: null
+        }
+      };
+    });
+    localStorage.setItem(key, JSON.stringify({ studyContext, entries: prunedEntries }));
+    return;
+  } catch (e: any) {
+    console.warn('[aiStore] Pruned persistence failed, stripping all thumbnails from storage:', e?.message);
+  }
+
+  try {
+    // 3. Strip all thumbnailPng from localStorage (in-memory state still retains them)
+    const lightweightEntries = entries.map(entry => ({
+      ...entry,
+      snapshot: {
+        ...entry.snapshot,
+        thumbnailPng: null
+      }
+    }));
+    localStorage.setItem(key, JSON.stringify({ studyContext, entries: lightweightEntries }));
+    return;
+  } catch (e: any) {
+    console.warn('[aiStore] Lightweight persistence failed, keeping last 8 entries:', e?.message);
+  }
+
+  try {
+    // 4. Keep only the last 8 entries
+    const minimalEntries = entries.slice(-8).map(entry => ({
+      ...entry,
+      snapshot: {
+        ...entry.snapshot,
+        thumbnailPng: null
+      }
+    }));
+    localStorage.setItem(key, JSON.stringify({ studyContext, entries: minimalEntries }));
+  } catch (finalErr) {
+    console.warn('[aiStore] Unable to persist to localStorage (quota exhausted):', finalErr);
+  }
+};
+
 const buildDefaultSystemPrompt = (studyContext: StudyContext | null): string => {
   let prompt = `You are a senior scientific researcher, scientometrician, and academic co-author expert in quantitative analysis and complex visual data exploration on the KnoMap platform.
 
@@ -227,16 +288,9 @@ export const useAiStore = create<AiState>((set, get) => ({
     };
     set({ studyContext: updated });
     
-    // Save to localStorage
-    try {
-      const key = getStorageKey(get().currentProjectId);
-      const raw = localStorage.getItem(key);
-      const data = raw ? JSON.parse(raw) : {};
-      data.studyContext = updated;
-      localStorage.setItem(key, JSON.stringify(data));
-    } catch (e) {
-      console.error('Failed to save studyContext to localStorage', e);
-    }
+    // Save to localStorage safely
+    const key = getStorageKey(get().currentProjectId);
+    safePersistReport(key, updated, get().entries);
   },
 
   openContextModal: () => set({ isContextModalOpen: true }),
@@ -262,15 +316,8 @@ export const useAiStore = create<AiState>((set, get) => ({
       activeEntryId
     });
 
-    try {
-      const key = getStorageKey(pid);
-      localStorage.setItem(key, JSON.stringify({
-        studyContext,
-        entries
-      }));
-    } catch (e) {
-      console.error('Failed to sync loaded report to localStorage', e);
-    }
+    const key = getStorageKey(pid);
+    safePersistReport(key, studyContext, entries);
   },
 
   clearReport: () => {
@@ -331,16 +378,9 @@ export const useAiStore = create<AiState>((set, get) => ({
       activeEntryId: entryId
     });
 
-    // Save to localStorage
+    // Save to localStorage safely
     const key = getStorageKey(get().currentProjectId);
-    try {
-      localStorage.setItem(key, JSON.stringify({
-        studyContext: get().studyContext,
-        entries: updatedEntries
-      }));
-    } catch (e) {
-      console.error('Failed to save entries to localStorage', e);
-    }
+    safePersistReport(key, get().studyContext, updatedEntries);
 
     if (autoAnalyze) {
       const userText = initialUserPrompt || `Write a two to three paragraph scientific analysis in peer-reviewed journal style discussing the figure "${newEntry.title}". Describe the overall observed structure, elaborate on the empirical quantitative contrasts and findings, and synthesize the methodological and scientometric implications.`;
@@ -438,12 +478,9 @@ export const useAiStore = create<AiState>((set, get) => ({
         };
         set({ entries: finalEntries });
 
-        // Save to localStorage
+        // Save to localStorage safely (never throws)
         const key = getStorageKey(get().currentProjectId);
-        localStorage.setItem(key, JSON.stringify({
-          studyContext: get().studyContext,
-          entries: finalEntries
-        }));
+        safePersistReport(key, get().studyContext, finalEntries);
       }
     } catch (err: any) {
       console.error('Error calling LLM analyze:', err);
@@ -497,29 +534,15 @@ export const useAiStore = create<AiState>((set, get) => ({
       activeEntryId: nextActiveId
     });
 
-    // Save to localStorage
+    // Save to localStorage safely
     const key = getStorageKey(get().currentProjectId);
-    try {
-      localStorage.setItem(key, JSON.stringify({
-        studyContext: get().studyContext,
-        entries: updatedEntries
-      }));
-    } catch (e) {
-      console.error('Failed to update localStorage after entry deletion', e);
-    }
+    safePersistReport(key, get().studyContext, updatedEntries);
   },
 
   clearAllEntries: () => {
     set({ entries: [], activeEntryId: null });
     const key = getStorageKey(get().currentProjectId);
-    try {
-      localStorage.setItem(key, JSON.stringify({
-        studyContext: get().studyContext,
-        entries: []
-      }));
-    } catch (e) {
-      console.error('Failed to clear entries in localStorage', e);
-    }
+    safePersistReport(key, get().studyContext, []);
   },
 
   setActiveEntryId: (entryId: string | null) => {

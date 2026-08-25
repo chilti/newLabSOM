@@ -158,15 +158,60 @@ export const InteractiveChartViewer: React.FC<InteractiveChartViewerProps> = ({ 
   // 3. Render Bar Chart
   const renderBarChart = () => {
     if (!Array.isArray(data) || data.length === 0) return null;
-    const xKey = config?.xAxisKey || 'name';
-    const yKey = config?.yAxisKey || 'value' || 'docs';
+    
+    // Check if this is a Quartiles stacked bar dataset (contains Q1, Q2, Q3, Q4)
+    const isQuartileData = data.some((d: any) => d && (d.Q1 !== undefined || d.Q2 !== undefined || d.Q3 !== undefined || d.Q4 !== undefined));
+    if (isQuartileData) {
+      const chartHeight = Math.max(340, Math.min(data.length * 28, 500));
+      return (
+        <div className="w-full overflow-y-auto custom-scrollbar" style={{ maxHeight: '420px' }}>
+          <div style={{ height: chartHeight }}>
+            <ResponsiveContainer width="100%" height={chartHeight} minHeight={300}>
+              <BarChart data={data} layout="vertical" margin={{ top: 5, right: 25, left: 10, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" horizontal={false} opacity={0.4} />
+                <XAxis type="number" domain={[0, 100]} stroke="#9CA3AF" tick={{ fontSize: 10, fill: '#9CA3AF' }} unit="%" />
+                <YAxis dataKey="entity" type="category" width={150} stroke="#9CA3AF" tick={{ fontSize: 9, fill: '#cbd5e1' }} interval={0} />
+                <Tooltip 
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload || !payload.length) return null;
+                    return (
+                      <div className="bg-gray-900 border border-gray-700 p-2.5 rounded-xl shadow-xl text-xs space-y-1 z-50">
+                        <p className="font-bold text-gray-200 border-b border-gray-800 pb-1 mb-1">{label}</p>
+                        {payload.map((entry: any, i: number) => (
+                          <div key={i} className="flex items-center justify-between space-x-4">
+                            <span className="font-medium" style={{ color: entry.fill }}>
+                              {entry.name}:
+                            </span>
+                            <span className="font-bold text-gray-200 ml-2">
+                              {typeof entry.value === 'number' ? entry.value.toFixed(1) : entry.value}%
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '6px', color: '#cbd5e1' }} />
+                <Bar dataKey="Q1" name="Q1 (Top 25%)" stackId="q" fill="#6366f1" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="Q2" name="Q2 (25%-50%)" stackId="q" fill="#34d399" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="Q3" name="Q3 (50%-75%)" stackId="q" fill="#fbbf24" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="Q4" name="Q4 (75%-100%)" stackId="q" fill="#f87171" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      );
+    }
+
+    const xKey = config?.xAxisKey || (data[0]?.entity !== undefined ? 'entity' : 'name');
+    const yKey = config?.yAxisKey || (data[0]?.value !== undefined ? 'value' : 'docs');
 
     return (
       <div className="w-full h-80 pt-2">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data.slice(0, 15)} margin={{ top: 20, right: 30, bottom: 40, left: 20 }}>
+          <BarChart data={data.slice(0, 25)} margin={{ top: 20, right: 30, bottom: 40, left: 20 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.4} />
-            <XAxis dataKey={xKey} stroke="#9CA3AF" angle={-35} textAnchor="end" interval={0} height={50} tick={{ fill: '#9CA3AF', fontSize: 10 }} />
+            <XAxis dataKey={xKey} stroke="#9CA3AF" angle={-35} textAnchor="end" interval={0} height={55} tick={{ fill: '#9CA3AF', fontSize: 10 }} />
             <YAxis stroke="#9CA3AF" tick={{ fill: '#9CA3AF', fontSize: 11 }} />
             <Tooltip 
               contentStyle={{ backgroundColor: '#030712', borderColor: '#6366f1', borderRadius: '0.75rem', fontSize: '12px' }}
@@ -181,9 +226,57 @@ export const InteractiveChartViewer: React.FC<InteractiveChartViewerProps> = ({ 
   // 4. Render Radar Chart
   const renderRadarChart = () => {
     if (!Array.isArray(data) || data.length === 0) return null;
-    const indicatorKey = config?.indicatorKey || 'subject' || 'indicator';
-    const valKey = config?.valueKey || 'value' || 'A';
+    const indicatorKey = config?.indicatorKey || (data[0]?.indicator !== undefined ? 'indicator' : 'subject');
+    
+    // Check if multi-entity radar data (each column other than indicator is an entity)
+    const entityKeys = Object.keys(data[0] || {}).filter(k => 
+      k !== indicatorKey && k !== 'subject' && k !== 'indicator' && !k.endsWith('_raw') && typeof data[0][k] === 'number'
+    );
 
+    const colors = ['#818cf8', '#34d399', '#f87171', '#fbbf24', '#c084fc', '#2dd4bf', '#fb923c', '#f472b6'];
+
+    if (entityKeys.length > 0) {
+      return (
+        <div className="w-full h-80 pt-2">
+          <ResponsiveContainer width="100%" height="100%">
+            <RadarChart outerRadius={95} data={data} margin={{ top: 15, right: 25, bottom: 15, left: 25 }}>
+              <PolarGrid stroke="#374151" />
+              <PolarAngleAxis dataKey={indicatorKey} stroke="#9CA3AF" tick={{ fill: '#cbd5e1', fontSize: 10, fontWeight: 500 }} />
+              <PolarRadiusAxis angle={30} domain={[0, 100]} stroke="#6B7280" tick={{ fontSize: 9, fill: '#9CA3AF' }} unit="%" />
+              <Tooltip 
+                content={({ active, payload, label }) => {
+                  if (!active || !payload || !payload.length) return null;
+                  return (
+                    <div className="bg-gray-900 border border-gray-700 p-3 rounded-xl shadow-xl text-xs space-y-1 z-50">
+                      <p className="font-bold text-gray-200 border-b border-gray-800 pb-1">{label}</p>
+                      {payload.map((entry: any) => (
+                        <p key={entry.name} style={{ color: entry.color }}>
+                          <span className="font-semibold">{entry.name}:</span> {entry.value}% {entry.payload?.[`${entry.name}_raw`] !== undefined ? <span className="text-gray-400 text-[10px]">({entry.payload[`${entry.name}_raw`]})</span> : null}
+                        </p>
+                      ))}
+                    </div>
+                  );
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '6px' }} />
+              {entityKeys.map((ent, i) => (
+                <Radar 
+                  key={ent} 
+                  name={ent} 
+                  dataKey={ent} 
+                  stroke={colors[i % colors.length]} 
+                  fill={colors[i % colors.length]} 
+                  fillOpacity={0.25} 
+                  strokeWidth={2} 
+                />
+              ))}
+            </RadarChart>
+          </ResponsiveContainer>
+        </div>
+      );
+    }
+
+    const valKey = config?.valueKey || 'value' || 'A';
     return (
       <div className="w-full h-80 pt-2">
         <ResponsiveContainer width="100%" height="100%">
@@ -495,7 +588,7 @@ export const InteractiveChartViewer: React.FC<InteractiveChartViewerProps> = ({ 
       <div className="relative p-3 flex items-center justify-center min-h-[260px] max-h-[500px] overflow-auto custom-scrollbar">
         {viewMode === 'svg' && svgMarkup ? (
           <div 
-            className="w-full h-auto max-h-[460px] flex items-center justify-center pointer-events-auto select-none [&>svg]:max-h-[440px] [&>svg]:w-auto [&>svg]:max-w-full [&>svg]:h-auto [&>svg]:mx-auto"
+            className="w-full h-auto max-h-[460px] overflow-auto custom-scrollbar flex items-center justify-center pointer-events-auto select-none bg-white rounded-xl p-2 border border-gray-200 shadow-sm [&>svg]:max-h-[440px] [&>svg]:w-auto [&>svg]:max-w-full [&>svg]:h-auto [&>svg]:mx-auto [&>svg]:rounded-lg"
             dangerouslySetInnerHTML={{ __html: svgMarkup }}
           />
         ) : viewMode === 'interactive' ? (
@@ -504,7 +597,7 @@ export const InteractiveChartViewer: React.FC<InteractiveChartViewerProps> = ({ 
           <img 
             src={thumbnailPng} 
             alt={snapshot.title} 
-            className="max-h-96 w-auto max-w-full rounded-xl object-contain border border-gray-800 shadow-md"
+            className="max-h-[440px] w-auto max-w-full rounded-xl object-contain border border-gray-200 shadow-md bg-white p-1"
           />
         ) : (
           renderInteractiveContent()

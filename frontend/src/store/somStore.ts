@@ -1109,7 +1109,9 @@ export const useSomStore = create<SOMState>((set, get) => ({
             indicatorsList: get().compNames
           },
           activeTrajectories: new Set(),
-          entityColorOverrides: {}
+          entityColorOverrides: {},
+          longitudinalResults: null,
+          activeLongitudinalPeriod: ''
         });
         get().fetchSizeSuggestions(get().dataMatrix);
       } else {
@@ -1186,7 +1188,9 @@ export const useSomStore = create<SOMState>((set, get) => ({
             indicatorsList: get().compNames
           },
           activeTrajectories: new Set(),
-          entityColorOverrides: {}
+          entityColorOverrides: {},
+          longitudinalResults: null,
+          activeLongitudinalPeriod: ''
         });
         get().fetchSizeSuggestions(get().dataMatrix);
         return true;

@@ -3,6 +3,7 @@ import html2canvas from 'html2canvas';
 import { useAiStore, type ChartSnapshot } from '../store/aiStore';
 import { useSomStore } from '../store/somStore';
 import { Sparkles, Check, Loader2 } from 'lucide-react';
+import { getSerializedSvg, convertSvgStringToPngDataUrl } from '../utils/chartExport';
 
 interface SendToAssistantButtonProps {
   title: string;
@@ -20,42 +21,6 @@ interface SendToAssistantButtonProps {
   buttonText?: string;
   onBeforeSend?: () => void;
 }
-
-const convertSvgToPngFast = (svgString: string): Promise<string | null> => {
-  return new Promise((resolve) => {
-    try {
-      const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const img = new Image();
-      img.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = img.naturalWidth || 800;
-          canvas.height = img.naturalHeight || 500;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.fillStyle = '#030712';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(img, 0, 0);
-            const pngData = canvas.toDataURL('image/png');
-            URL.revokeObjectURL(url);
-            resolve(pngData);
-            return;
-          }
-        } catch {}
-        URL.revokeObjectURL(url);
-        resolve(null);
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve(null);
-      };
-      img.src = url;
-    } catch {
-      resolve(null);
-    }
-  });
-};
 
 export const SendToAssistantButton: React.FC<SendToAssistantButtonProps> = ({
   title,
@@ -94,69 +59,35 @@ export const SendToAssistantButton: React.FC<SendToAssistantButtonProps> = ({
       container = (e.currentTarget.closest('[id^="comp-viewport"], [id^="comp-grid"], .chart-container, .relative, .border') as HTMLElement);
     }
 
-    // 2. Extract the exact configured map/chart SVG (instantaneous, < 1ms)
+    // 2. Extract serialized SVG with inlined styles and calculated dimensions
     if (container) {
-      const allSvgs = Array.from(container.querySelectorAll('svg'));
-      
-      // Filter out small UI/Lucide icon SVGs (in buttons, headers, toolbars)
-      const chartSvgs = allSvgs.filter(svg => {
-        if (svg.closest('button')) return false;
-        const cls = (svg.getAttribute('class') || '') + ' ' + (svg.className?.baseVal || '');
-        if (cls.includes('lucide')) return false;
-        // Prioritize actual chart SVGs
-        if (cls.includes('map-hexagonal-svg') || cls.includes('recharts-surface') || svg.querySelector('polygon, circle, line, path.recharts-curve')) {
-          return true;
-        }
-        const bbox = svg.getBoundingClientRect();
-        return bbox.width > 40 && bbox.height > 40;
-      });
-
-      const svgEl = chartSvgs[0] || allSvgs.find(s => !s.closest('button')) || null;
-
-      if (svgEl) {
+      const serialized = getSerializedSvg(container, '#ffffff');
+      if (serialized) {
+        svgMarkup = serialized.svgString;
         try {
-          const svgClone = svgEl.cloneNode(true) as SVGSVGElement;
-          
-          if (!svgClone.getAttribute('xmlns')) {
-            svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-          }
-          if (!svgClone.getAttribute('xmlns:xlink')) {
-            svgClone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
-          }
-
-          // If no viewBox exists, calculate from bounding box
-          if (!svgClone.getAttribute('viewBox')) {
-            const bbox = svgEl.getBoundingClientRect();
-            if (bbox.width > 0 && bbox.height > 0) {
-              svgClone.setAttribute('viewBox', `0 0 ${bbox.width} ${bbox.height}`);
-            }
-          }
-
-          svgClone.removeAttribute('width');
-          svgClone.removeAttribute('height');
-          svgClone.setAttribute('style', 'max-height: 440px; width: 100%; height: auto; display: block; margin: 0 auto;');
-
-          svgMarkup = new XMLSerializer().serializeToString(svgClone);
+          thumbnailPng = await convertSvgStringToPngDataUrl(
+            serialized.svgString, 
+            serialized.width, 
+            serialized.height, 
+            2, 
+            '#ffffff'
+          );
         } catch (err) {
-          console.warn('Could not serialize SVG markup:', err);
+          console.warn('Fast SVG to PNG rasterization failed:', err);
         }
       }
 
-      // 3. Fast PNG generation (instantaneous from SVG without blocking DOM thread)
-      if (svgMarkup) {
-        try {
-          thumbnailPng = await convertSvgToPngFast(svgMarkup);
-        } catch {}
-      } else if (container) {
-        // Fallback only when no SVG is found
+      // 3. Fallback only when no SVG is found or rasterization failed
+      if (!thumbnailPng && container) {
         try {
           const canvas = await html2canvas(container, {
-            backgroundColor: '#030712',
-            scale: 1.0,
+            backgroundColor: '#ffffff',
+            scale: 2,
             logging: false,
-            useCORS: true
+            useCORS: true,
+            allowTaint: true
           });
-          thumbnailPng = canvas.toDataURL('image/png');
+          thumbnailPng = canvas.toDataURL('image/png', 1.0);
         } catch (err) {
           console.warn('Could not capture DOM snapshot with html2canvas:', err);
         }

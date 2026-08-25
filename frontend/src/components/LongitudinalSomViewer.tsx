@@ -21,7 +21,7 @@ export const LongitudinalSomViewer: React.FC = () => {
   const [activeSubTab, setActiveSubTab] = useState<'player' | 'side_by_side' | 'drift' | 'migration'>('player');
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1500); // ms per step
-  const [colorMode, setColorMode] = useState<'umatrix' | 'clusters' | 'frequencies'>('umatrix');
+  const [colorMode, setColorMode] = useState<'umatrix' | 'clusters' | 'frequencies'>('clusters');
   const [selectedNeuron, setSelectedNeuron] = useState<number | null>(null);
 
   const periods = useMemo(() => {
@@ -84,7 +84,8 @@ export const LongitudinalSomViewer: React.FC = () => {
     if (!mapData?.hexGrid || mapData.hexGrid.length === 0) return null;
 
     const hexGrid = mapData.hexGrid;
-    const umatrix = mapData.umatrix || [];
+    const rawUmatrix = mapData.umatrix || [];
+    const umatrix = Array.isArray(rawUmatrix[0]) ? rawUmatrix.flat() : rawUmatrix;
     const clustering = mapData.clustering || [];
     const frequencies = mapData.frequencies || [];
     const mappedLabels = mapData.mappedLabels || [];

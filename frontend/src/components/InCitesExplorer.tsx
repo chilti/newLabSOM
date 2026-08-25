@@ -1310,7 +1310,17 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                             {tsEntities.length > 0 && <span className="text-gray-500 ml-2 font-normal">(Top {tsEntities.length} de {totalEntities})</span>}
                                         </h3>
                                         <div className="flex items-center space-x-3 ml-auto flex-wrap gap-y-2">
-                                            <ExportButtons containerId="chart-time-series" filename={`time_series_${tsIndicator || 'data'}`} />
+                                            <ExportButtons 
+                                                containerId="chart-time-series" 
+                                                filename={`time_series_${tsIndicator || 'data'}`} 
+                                                chartTitle={`Time Series: ${unitName} - ${tsIndicator}`}
+                                                chartType="trend"
+                                                chartData={tsChartData}
+                                                dataPrompt={`Time Series Data for "${unitName}" (${tsIndicator}).\n` +
+                                                    `Years: ${tsChartData.map((d: any) => d.time).join(', ')}.\n` +
+                                                    `Tracked Entities (${tsEntities.length}): ${tsEntities.slice(0, 10).join(', ')}...`
+                                                }
+                                            />
                                             <select
                                                 value={tsIndicator}
                                                 onChange={e => setTsIndicator(e.target.value)}
@@ -1400,7 +1410,16 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                         </div>
 
                                         <div className="flex items-center space-x-2 flex-wrap gap-2">
-                                            <ExportButtons containerId="chart-stacked-area" filename={`stacked_area_${tsIndicator || 'data'}`} />
+                                            <ExportButtons 
+                                                containerId="chart-stacked-area" 
+                                                filename={`stacked_area_${tsIndicator || 'data'}`} 
+                                                chartTitle={`Stacked Area Evolution: ${unitName} - ${tsIndicator} (${areaMode === 'percentage' ? '100% Share' : 'Absolute Volume'})`}
+                                                chartType="trend"
+                                                chartData={stackedAreaData}
+                                                dataPrompt={`Stacked Area Evolution (${areaMode}) for "${unitName}" (${tsIndicator}).\n` +
+                                                    `Years: ${stackedAreaData.map((d: any) => d.time).join(', ')}.`
+                                                }
+                                            />
                                             <div className="flex space-x-1 bg-gray-950 p-1 rounded-xl border border-gray-800">
                                             <button
                                                 onClick={() => setAreaMode('absolute')}
@@ -1463,7 +1482,18 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                             </h3>
                                             <p className="text-[11px] text-gray-500">Compound Annual Growth Rate vs. latest volume ({tsIndicator}).</p>
                                         </div>
-                                        <ExportButtons containerId="chart-cagr-scatter" filename="cagr_growth_matrix" />
+                                        <ExportButtons 
+                                            containerId="chart-cagr-scatter" 
+                                            filename="cagr_growth_matrix" 
+                                            chartTitle={`CAGR Strategic Growth Matrix: ${unitName} (${tsIndicator})`}
+                                            chartType="scatter"
+                                            chartData={cagrScatterData.points}
+                                            dataPrompt={`Strategic Growth Matrix (CAGR % vs Volume) for "${unitName}" (${tsIndicator}).\n` +
+                                                `Median Volume: ${cagrScatterData.medianVolume.toFixed(1)}, Median CAGR: ${cagrScatterData.medianCagr.toFixed(2)}%.\n` +
+                                                `Entities:\n` +
+                                                cagrScatterData.points.slice(0, 25).map((p: any) => `- ${p.entity}: Volume=${p.volume}, CAGR=${p.cagr}%`).join('\n')
+                                            }
+                                        />
                                     </div>
 
                                     <div className="w-full relative" style={{ height: 420 }} id="chart-cagr-scatter">
@@ -1779,25 +1809,25 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                     {/* Main Chart Area & Continuous Colorbar */}
                                     <div className="flex flex-row items-stretch gap-4" style={{ height: 480 }}>
                                         {/* Scatter Chart Canvas */}
-                                        <div className="flex-1 bg-gray-950/60 border border-gray-800/80 rounded-xl p-2 min-w-0" id="chart-4d-bubble">
+                                        <div className="flex-1 bg-white border border-gray-200 rounded-xl p-2 min-w-0" id="chart-4d-bubble">
                                             <ResponsiveContainer width="100%" height="100%" minHeight={400}>
                                                 <ScatterChart margin={{ top: 20, right: 30, bottom: 25, left: 20 }}>
-                                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--gray-800, #1e293b)" />
+                                                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                                                     <XAxis
                                                         type="number"
                                                         dataKey="x"
                                                         name={bubbleIndX}
-                                                        stroke="var(--gray-400, #64748b)"
-                                                        tick={{ fontSize: 10, fill: 'var(--gray-400, #94a3b8)' }}
-                                                        label={{ value: bubbleIndX, position: 'bottom', offset: 5, fill: 'var(--gray-300, #cbd5e1)', fontSize: 11, fontWeight: 'bold' }}
+                                                        stroke="#64748b"
+                                                        tick={{ fontSize: 10, fill: '#475569' }}
+                                                        label={{ value: bubbleIndX, position: 'bottom', offset: 5, fill: '#334155', fontSize: 11, fontWeight: 'bold' }}
                                                     />
                                                     <YAxis
                                                         type="number"
                                                         dataKey="y"
                                                         name={bubbleIndY}
-                                                        stroke="var(--gray-400, #64748b)"
-                                                        tick={{ fontSize: 10, fill: 'var(--gray-400, #94a3b8)' }}
-                                                        label={{ value: bubbleIndY, angle: -90, position: 'left', offset: -5, fill: 'var(--gray-300, #cbd5e1)', fontSize: 11, fontWeight: 'bold' }}
+                                                        stroke="#64748b"
+                                                        tick={{ fontSize: 10, fill: '#475569' }}
+                                                        label={{ value: bubbleIndY, angle: -90, position: 'left', offset: -5, fill: '#334155', fontSize: 11, fontWeight: 'bold' }}
                                                     />
                                                     <ZAxis type="number" dataKey="size" range={[100, 1000]} name={bubbleIndSize} />
                                                     <RechartsTooltip
@@ -1838,10 +1868,10 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                                                         <text
                                                                             x={cx + r + 4}
                                                                             y={cy + 3}
-                                                                            fill="#cbd5e1"
+                                                                            fill="#1e293b"
                                                                             fontSize={9}
-                                                                            fontWeight={500}
-                                                                            className="pointer-events-none select-none drop-shadow"
+                                                                            fontWeight={600}
+                                                                            className="pointer-events-none select-none"
                                                                         >
                                                                             {payload.entity}
                                                                         </text>
@@ -1859,22 +1889,22 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                         </div>
 
                                         {/* Continuous Colorbar Bar Legend */}
-                                        <div className="w-28 bg-gray-950/60 border border-gray-800/80 rounded-xl p-3 flex flex-col justify-between items-center shrink-0 select-none">
-                                            <div className="text-[10px] font-bold text-gray-300 text-center uppercase tracking-wider mb-2 max-w-full truncate" title={bubbleIndColor}>
+                                        <div className="w-28 bg-white border border-gray-200 rounded-xl p-3 flex flex-col justify-between items-center shrink-0 select-none">
+                                            <div className="text-[10px] font-bold text-gray-800 text-center uppercase tracking-wider mb-2 max-w-full truncate" title={bubbleIndColor}>
                                                 {bubbleIndColor}
                                             </div>
                                             
                                             <div className="flex-1 flex items-center space-x-3 w-full justify-center">
                                                 {/* Gradient Bar */}
                                                 <div
-                                                    className="w-4 h-full rounded-md shadow-inner border border-gray-700/50"
+                                                    className="w-4 h-full rounded-md shadow-inner border border-gray-300"
                                                     style={{
                                                         background: 'linear-gradient(to top, #0d0887, #6a00a8, #b12a90, #e16462, #fca636, #f0f921)'
                                                     }}
                                                 />
                                                 
                                                 {/* Labels & Ticks */}
-                                                <div className="h-full flex flex-col justify-between text-[10px] font-semibold text-gray-400">
+                                                <div className="h-full flex flex-col justify-between text-[10px] font-semibold text-gray-700">
                                                     <span>{typeof bubbleChartData.maxColor === 'number' ? bubbleChartData.maxColor.toFixed(1) : bubbleChartData.maxColor}</span>
                                                     <span>{typeof bubbleChartData.maxColor === 'number' && typeof bubbleChartData.minColor === 'number' ? ((bubbleChartData.maxColor + bubbleChartData.minColor) / 2).toFixed(1) : '-'}</span>
                                                     <span>{typeof bubbleChartData.minColor === 'number' ? bubbleChartData.minColor.toFixed(1) : bubbleChartData.minColor}</span>
@@ -1939,12 +1969,12 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                         </div>
                                     </div>
 
-                                    <div className="w-full flex justify-center items-center" style={{ height: 380 }} id="chart-radar-comparison">
+                                    <div className="w-full flex justify-center items-center bg-white rounded-xl" style={{ height: 380 }} id="chart-radar-comparison">
                                         <ResponsiveContainer width="100%" height="100%" minHeight={340}>
                                             <RadarChart data={radarChartData} margin={{ top: 20, right: 30, bottom: 20, left: 30 }}>
-                                                <PolarGrid stroke="var(--gray-800, #334155)" />
-                                                <PolarAngleAxis dataKey="indicator" stroke="var(--gray-300, #cbd5e1)" tick={{ fontSize: 10, fill: 'var(--gray-300, #cbd5e1)' }} />
-                                                <PolarRadiusAxis angle={30} domain={[0, 100]} stroke="var(--gray-600, #475569)" tick={{ fontSize: 9, fill: 'var(--gray-500, #64748b)' }} unit="%" />
+                                                <PolarGrid stroke="#cbd5e1" />
+                                                <PolarAngleAxis dataKey="indicator" stroke="#334155" tick={{ fontSize: 10, fill: '#1e293b', fontWeight: 600 }} />
+                                                <PolarRadiusAxis angle={30} domain={[0, 100]} stroke="#94a3b8" tick={{ fontSize: 9, fill: '#475569' }} unit="%" />
                                                 <RechartsTooltip
                                                     content={({ active, payload, label }) => {
                                                         if (!active || !payload || !payload.length) return null;
@@ -1960,7 +1990,7 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                                         );
                                                     }}
                                                 />
-                                                <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                                                <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px', color: '#1e293b' }} />
                                                 {radarEntities.map((ent, i) => (
                                                     <Radar
                                                         key={ent}
@@ -2050,13 +2080,13 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                             </button>
                                         </div>
                                     </div>
-                                    <div className="w-full overflow-y-auto custom-scrollbar h-[420px]" id="chart-quartile-distribution">
+                                    <div className="w-full overflow-y-auto custom-scrollbar h-[420px] bg-white rounded-xl" id="chart-quartile-distribution">
                                         <div style={{ height: dynamicChartHeight }}>
                                             <ResponsiveContainer width="100%" height={dynamicChartHeight} minHeight={300} key={`qchart_${sidebarTab}_${dynamicChartHeight}`}>
                                                 <BarChart data={quartileChartData} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                                                <CartesianGrid strokeDasharray="3 3" stroke="var(--gray-700, #334155)" horizontal={false} />
-                                                <XAxis type="number" domain={[0, 100]} stroke="var(--gray-400, #64748b)" tick={{ fontSize: 10, fill: 'var(--gray-300, #64748b)' }} unit="%" />
-                                                <YAxis dataKey="entity" type="category" width={160} stroke="var(--gray-400, #64748b)" tick={{ fontSize: 9, fill: 'var(--gray-300, #64748b)' }} interval={0} />
+                                                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
+                                                <XAxis type="number" domain={[0, 100]} stroke="#64748b" tick={{ fontSize: 10, fill: '#1e293b', fontWeight: 500 }} unit="%" />
+                                                <YAxis dataKey="entity" type="category" width={160} stroke="#64748b" tick={{ fontSize: 9, fill: '#1e293b', fontWeight: 500 }} interval={0} />
                                                 <RechartsTooltip
                                                     content={({ active, payload, label }) => {
                                                         if (!active || !payload || !payload.length) return null;
@@ -2077,7 +2107,7 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                                         );
                                                     }}
                                                 />
-                                                <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+                                                <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px', color: '#1e293b' }} />
                                                 <Bar dataKey="Q1" name="Q1 (Top 25%)" stackId="q" fill="#6366f1" radius={[0, 0, 0, 0]} />
                                                 <Bar dataKey="Q2" name="Q2 (25%-50%)" stackId="q" fill="#34d399" radius={[0, 0, 0, 0]} />
                                                 <Bar dataKey="Q3" name="Q3 (50%-75%)" stackId="q" fill="#fbbf24" radius={[0, 0, 0, 0]} />
@@ -2126,13 +2156,13 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                                 </select>
                                             </div>
                                         </div>
-                                        <div className="w-full overflow-y-auto custom-scrollbar h-[520px]" id="chart-bar-1">
+                                        <div className="w-full overflow-y-auto custom-scrollbar h-[520px] bg-white rounded-xl" id="chart-bar-1">
                                             <div style={{ height: dynamicChartHeight }}>
                                                 <ResponsiveContainer width="100%" height={dynamicChartHeight} minHeight={300} key={`barchart1_${barInd1}_${dynamicChartHeight}`}>
                                                     <BarChart data={barData1} layout="vertical" margin={{ top: 5, right: 25, left: 10, bottom: 5 }}>
-                                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--gray-700, #334155)" horizontal={false} />
-                                                    <XAxis type="number" stroke="var(--gray-400, #64748b)" tick={{ fontSize: 10, fill: 'var(--gray-300, #64748b)' }} />
-                                                    <YAxis dataKey="entity" type="category" width={180} stroke="var(--gray-400, #64748b)" tick={{ fontSize: 9, fill: 'var(--gray-300, #64748b)' }} interval={0} />
+                                                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
+                                                    <XAxis type="number" stroke="#64748b" tick={{ fontSize: 10, fill: '#1e293b', fontWeight: 500 }} />
+                                                    <YAxis dataKey="entity" type="category" width={180} stroke="#64748b" tick={{ fontSize: 9, fill: '#1e293b', fontWeight: 500 }} interval={0} />
                                                     <RechartsTooltip
                                                         content={({ active, payload, label }) => {
                                                             if (!active || !payload || !payload.length) return null;
@@ -2183,13 +2213,13 @@ const UnitPanel: React.FC<{ unitName: string; unit: any }> = ({ unitName, unit }
                                                 </select>
                                             </div>
                                         </div>
-                                        <div className="w-full overflow-y-auto custom-scrollbar h-[520px]" id="chart-bar-2">
+                                        <div className="w-full overflow-y-auto custom-scrollbar h-[520px] bg-white rounded-xl" id="chart-bar-2">
                                             <div style={{ height: dynamicChartHeight }}>
                                                 <ResponsiveContainer width="100%" height={dynamicChartHeight} minHeight={300} key={`barchart2_${barInd2}_${dynamicChartHeight}`}>
                                                     <BarChart data={barData2} layout="vertical" margin={{ top: 5, right: 25, left: 10, bottom: 5 }}>
-                                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--gray-700, #334155)" horizontal={false} />
-                                                    <XAxis type="number" stroke="var(--gray-400, #64748b)" tick={{ fontSize: 10, fill: 'var(--gray-300, #64748b)' }} />
-                                                    <YAxis dataKey="entity" type="category" width={180} stroke="var(--gray-400, #64748b)" tick={{ fontSize: 9, fill: 'var(--gray-300, #64748b)' }} interval={0} />
+                                                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
+                                                    <XAxis type="number" stroke="#64748b" tick={{ fontSize: 10, fill: '#1e293b', fontWeight: 500 }} />
+                                                    <YAxis dataKey="entity" type="category" width={180} stroke="#64748b" tick={{ fontSize: 9, fill: '#1e293b', fontWeight: 500 }} interval={0} />
                                                     <RechartsTooltip
                                                         content={({ active, payload, label }) => {
                                                             if (!active || !payload || !payload.length) return null;
