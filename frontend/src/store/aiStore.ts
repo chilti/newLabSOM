@@ -1,6 +1,11 @@
 import { create } from 'zustand';
-import { getApiUrl } from './somStore';
+import { getApiUrl } from '../utils/api';
+import { useSomStore } from './somStore';
 import { jsPDF } from 'jspdf';
+
+
+
+import { encryptSecret, decryptSecret } from '../utils/crypto';
 
 export interface LlmConfig {
   apiKey: string;
@@ -12,7 +17,7 @@ export interface LlmConfig {
 export const DEFAULT_LLM_CONFIG: LlmConfig = {
   apiKey: '',
   baseUrl: 'https://dinamica1.fciencias.unam.mx/v1/',
-  model: 'openai/gpt-oss-20b',
+  model: 'default',
   isCustom: false
 };
 
@@ -23,12 +28,25 @@ const loadSavedLlmConfig = (): LlmConfig => {
     const raw = localStorage.getItem(LLM_CONFIG_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      return {
+      const config: LlmConfig = {
         apiKey: parsed.apiKey || '',
         baseUrl: parsed.baseUrl || DEFAULT_LLM_CONFIG.baseUrl,
         model: parsed.model || DEFAULT_LLM_CONFIG.model,
         isCustom: !!parsed.isCustom
       };
+
+      // Asynchronously decrypt apiKey in memory if stored encrypted
+      if (config.apiKey && config.apiKey.startsWith('enc:v1:')) {
+        decryptSecret(config.apiKey).then(decrypted => {
+          if (decrypted) {
+            useAiStore.setState(state => ({
+              llmConfig: { ...state.llmConfig, apiKey: decrypted }
+            }));
+          }
+        });
+      }
+
+      return config;
     }
   } catch (e) {
     console.error('Failed to load LLM config from localStorage', e);
@@ -83,6 +101,29 @@ export interface ReportEntry {
   error?: string | null;
 }
 
+export interface AgentToolStep {
+  tool: string;
+  arguments: any;
+  result?: any;
+}
+
+export interface AgentArtifact {
+  type: string;
+  title: string;
+  html?: string;
+  svg?: string;
+}
+
+export interface AgentMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+  steps?: AgentToolStep[];
+  artifacts?: AgentArtifact[];
+  projectId?: string;
+}
+
 interface AiState {
   studyContext: StudyContext | null;
   isContextModalOpen: boolean;
@@ -92,7 +133,16 @@ interface AiState {
   activeEntryId: string | null;
   currentProjectId: string;
 
+  // Agent State & Mode
+  assistantMode: 'copilot' | 'autonomous_agent';
+  agentMessages: AgentMessage[];
+  isAgentRunning: boolean;
+
   // Actions
+  setAssistantMode: (mode: 'copilot' | 'autonomous_agent') => void;
+  sendAgentMessage: (text: string) => Promise<void>;
+  clearAgentMessages: () => void;
+
   setStudyContext: (description: string, title?: string) => void;
   openContextModal: () => void;
   closeContextModal: () => void;
@@ -121,6 +171,7 @@ interface AiState {
   loadReportPayload: (payload: any, projectId?: string | null) => void;
   clearReport: () => void;
 }
+
 
 const STORAGE_PREFIX = 'knomap_ai_data_';
 
@@ -220,6 +271,175 @@ export const useAiStore = create<AiState>((set, get) => ({
   activeEntryId: null,
   currentProjectId: 'default',
 
+  // Agent State
+  assistantMode: 'copilot',
+  agentMessages: [
+    {
+      id: 'welcome-agent',
+      role: 'assistant',
+      content: '¡Hola! Soy el Agente Científico Autónomo de knoMap. Puedo inspeccionar datasets, entrenar redes neuronales SOM, calcular dimensiones intrínsecas y generar mapas interactivos y reportes completos. ¿En qué investigación deseas que trabajemos hoy?',
+      timestamp: new Date().toISOString()
+    }
+  ],
+  isAgentRunning: false,
+
+  setAssistantMode: (mode) => set({ assistantMode: mode }),
+  clearAgentMessages: () => set({
+    agentMessages: [
+      {
+        id: 'welcome-agent',
+        role: 'assistant',
+        content: '¡Hola! Soy el Agente Científico Autónomo de knoMap. ¿En qué investigación deseas que trabajemos hoy?',
+        timestamp: new Date().toISOString()
+      }
+    ]
+  }),
+
+  sendAgentMessage: async (text: string) => {
+    if (!text.trim() || get().isAgentRunning) return;
+    const userMsg: AgentMessage = {
+      id: `msg-${Date.now()}`,
+      role: 'user',
+      content: text,
+      timestamp: new Date().toISOString()
+    };
+
+    set(state => ({
+      agentMessages: [...state.agentMessages, userMsg],
+      isAgentRunning: true
+    }));
+
+    let projectContext: any = null;
+    try {
+      if (typeof useSomStore !== 'undefined' && useSomStore.getState) {
+        const somStore = useSomStore.getState();
+        const rawMatrix = somStore.dataMatrix || somStore.dimData || null;
+        const totalRows = rawMatrix?.length || 0;
+        const totalCols = rawMatrix?.[0]?.length || 0;
+        const matrixSample = rawMatrix && rawMatrix.length > 0 ? rawMatrix.slice(0, 50) : null;
+        const labelsSample = (somStore.labels || []).slice(0, 50);
+
+        const incitesUnits = somStore.incitesUnitNames || [];
+        const activeUnit = somStore.incitesActiveUnit || (incitesUnits.length > 0 ? incitesUnits[0] : null);
+        const activeUnitRecords = activeUnit && somStore.incitesUnitCache?.[activeUnit] ? somStore.incitesUnitCache[activeUnit] : [];
+
+        projectContext = {
+          project_id: somStore.cloudProjectId || 'active_workspace',
+          project_name: somStore.cloudProjectTitle || somStore.fileName || 'Active Workspace',
+          file_name: somStore.fileName || somStore.dimFileName || '',
+          data_summary: {
+            total_items: totalRows,
+            dimensions: totalCols,
+            labels_preview: labelsSample,
+            sample_matrix: matrixSample
+          },
+          som_state: somStore.result ? {
+            status: 'trained',
+            grid: somStore.config ? [somStore.config.rows, somStore.config.cols] : [somStore.result.weights?.length || 10, somStore.result.weights?.[0]?.length || 10],
+            n_clusters: somStore.result.clustering ? new Set(somStore.result.clustering).size : 0,
+            has_umap: !!somStore.result.umap,
+            mapped_labels_count: somStore.result.mappedLabels?.length || 0
+          } : { status: 'not_trained' },
+          incites_data: {
+            loaded: incitesUnits.length > 0,
+            available_units: incitesUnits,
+            active_unit: activeUnit,
+            records_count: activeUnitRecords.length,
+            records_sample: activeUnitRecords.slice(0, 30)
+          },
+          dim_reduction: {
+            has_data: !!somStore.dimData,
+            file_name: somStore.dimFileName || '',
+            intrinsic_dimension: somStore.dimCeilingResult?.mle || somStore.dimManualResult?.dimension || null
+          },
+          active_modules: ['SOM & UMAP', 'Dim Reduction', 'Bibliometrics', 'InCites Explorer']
+        };
+      }
+    } catch (e) {
+      console.warn('[aiStore] Error building projectContext:', e);
+      projectContext = null;
+    }
+
+    const { llmConfig } = get();
+    const payloadBody: any = {
+      prompt: text,
+      projectContext
+    };
+
+    if (llmConfig.isCustom) {
+      if (llmConfig.apiKey) payloadBody.apiKey = llmConfig.apiKey;
+      if (llmConfig.baseUrl) payloadBody.baseUrl = llmConfig.baseUrl;
+      if (llmConfig.model) payloadBody.model = llmConfig.model;
+    }
+
+    try {
+      const res = await fetch(getApiUrl('/api/agent/chat'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payloadBody)
+      });
+
+
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        const txt = await res.text().catch(() => '');
+        data = { error: txt || `Error HTTP ${res.status}: ${res.statusText}` };
+      }
+
+      let replyContent = data.reply || (data.success ? 'Se completó la ejecución con éxito.' : (data.error || 'Ocurrió un error ejecutando la instrucción.'));
+      if (typeof replyContent === 'string') {
+        const trimmed = replyContent.trim();
+        if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (parsed.report_markdown && typeof parsed.report_markdown === 'string') {
+              replyContent = parsed.report_markdown;
+            } else if (parsed.response && typeof parsed.response === 'string') {
+              replyContent = parsed.response;
+            } else if (parsed.reply && typeof parsed.reply === 'string') {
+              replyContent = parsed.reply;
+            } else if (parsed.analysis && typeof parsed.analysis === 'string') {
+              replyContent = parsed.analysis;
+            } else if (parsed.message && typeof parsed.message === 'string') {
+              replyContent = parsed.message;
+            }
+          } catch {
+            // Keep as is
+          }
+        }
+      }
+
+      const assistantMsg: AgentMessage = {
+        id: `agent-resp-${Date.now()}`,
+        role: 'assistant',
+        content: replyContent,
+        timestamp: new Date().toISOString(),
+        steps: data.steps || [],
+        artifacts: data.artifacts || [],
+        projectId: data.project_id
+      };
+
+      set(state => ({
+        agentMessages: [...state.agentMessages, assistantMsg],
+        isAgentRunning: false
+      }));
+    } catch (err: any) {
+      const errorMsg: AgentMessage = {
+        id: `agent-err-${Date.now()}`,
+        role: 'assistant',
+        content: `Error al comunicar con el agente: ${err.message || 'Error de red. Verifica la conexión con el servidor de knoMap.'}`,
+        timestamp: new Date().toISOString()
+      };
+      set(state => ({
+        agentMessages: [...state.agentMessages, errorMsg],
+        isAgentRunning: false
+      }));
+    }
+  },
+
+
   setLlmConfig: (partial) => {
     const updated: LlmConfig = {
       ...get().llmConfig,
@@ -231,11 +451,20 @@ export const useAiStore = create<AiState>((set, get) => ({
       )
     };
     set({ llmConfig: updated });
-    try {
-      localStorage.setItem(LLM_CONFIG_STORAGE_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.error('Failed to persist llmConfig to localStorage', e);
-    }
+
+    // Asynchronously encrypt sensitive API Key before saving to localStorage
+    (async () => {
+      try {
+        const encryptedKey = updated.apiKey ? await encryptSecret(updated.apiKey) : '';
+        const payloadToPersist = {
+          ...updated,
+          apiKey: encryptedKey
+        };
+        localStorage.setItem(LLM_CONFIG_STORAGE_KEY, JSON.stringify(payloadToPersist));
+      } catch (e) {
+        console.error('Failed to persist encrypted llmConfig to localStorage', e);
+      }
+    })();
   },
 
   resetLlmConfig: () => {

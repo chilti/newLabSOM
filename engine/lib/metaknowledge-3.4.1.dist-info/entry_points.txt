@@ -1,0 +1,5 @@
+[console_scripts]
+metaknowledge = metaknowledge.bin:mkCLI
+metaknowledge-DocsGen = metaknowledge.bin:mkDocs
+metaknowledge-mdToNb = metaknowledge.bin:mkMdToNb
+

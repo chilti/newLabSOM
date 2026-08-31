@@ -1,6 +1,8 @@
 using LabSOM.Backend.Core.Data;
 using LabSOM.Backend.Core.Services;
+using LabSOM.Backend.Core.Utils;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -714,7 +716,211 @@ app.MapPost("/api/llm/test", async (HttpContext ctx, LlmService llmSvc) =>
     }
 });
 
+// Robust engine directory resolver
+static string GetEngineDirectory()
+{
+    string? dir = AppDomain.CurrentDomain.BaseDirectory;
+    while (!string.IsNullOrEmpty(dir))
+    {
+        var candidate = Path.Combine(dir, "engine");
+        if (Directory.Exists(candidate))
+        {
+            return candidate;
+        }
+        dir = Path.GetDirectoryName(dir);
+    }
+    return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "engine");
+}
+
+// MCP & Agent Gateway Endpoints
+app.MapGet("/api/mcp/config", (HttpRequest req) =>
+{
+    string target = req.Query["target"].FirstOrDefault() ?? "claude";
+    string engineDir = GetEngineDirectory();
+    string pythonExe = PythonUtils.GetPythonExecutablePath(engineDir);
+    string cliPath = Path.Combine(engineDir, "cli_mcp.py");
+
+    object configObj;
+    if (target.ToLower() == "picoclaw")
+    {
+        configObj = new
+        {
+            name = "knomap-engine",
+            transport = "stdio",
+            command = pythonExe,
+            args = new[] { cliPath, "--stdio" },
+            description = "knoMap Scientometrics & Topological Neural Mapping Engine"
+        };
+    }
+    else if (target.ToLower() == "antigravity" || target.ToLower() == "cursor")
+    {
+        configObj = new
+        {
+            mcpServers = new Dictionary<string, object>
+            {
+                ["knomap-engine"] = new
+                {
+                    command = pythonExe,
+                    args = new[] { cliPath, "--stdio" }
+                }
+            }
+        };
+    }
+    else
+    {
+        configObj = new
+        {
+            mcpServers = new Dictionary<string, object>
+            {
+                ["knomap"] = new
+                {
+                    command = pythonExe,
+                    args = new[] { cliPath, "--stdio" },
+                    env = new Dictionary<string, string>
+                    {
+                        ["PYTHONPATH"] = engineDir
+                    }
+                }
+            }
+        };
+    }
+
+    return Results.Ok(new
+    {
+        success = true,
+        target,
+        config = configObj,
+        tools = new[]
+        {
+            new { name = "knomap_get_active_project_manifest", description = "Global manifest of loaded modules and active dataset." },
+            new { name = "knomap_list_incites_entities", description = "Lists InCites entities (Locations, Organizations, Research Areas, Authors)." },
+            new { name = "knomap_query_incites_entity", description = "Queries records & metrics (CNCI, Times Cited, Documents, Top 10%, Collab) for any InCites entity." },
+            new { name = "knomap_get_som_state", description = "Inspects active SOM neural map topology, U-Matrix, clusters, and UMAP." },
+            new { name = "knomap_get_bibliometrics_state", description = "Inspects active co-occurrence networks and term statistics." },
+            new { name = "knomap_get_dim_reduction_state", description = "Inspects intrinsic dimensionality (skdim MLE) and reduced coordinates." },
+            new { name = "knomap_inspect_dataset", description = "Inspects format, size, columns of any bibliometrics file." },
+            new { name = "knomap_parse_file", description = "Parses WoS, Scopus, InCites, PubMed, RIS, CSV into co-occurrence matrix." },
+            new { name = "knomap_parse_incites", description = "Extracts InCites ZIP sessions and benchmarking units." },
+            new { name = "knomap_suggest_som_size", description = "Recommends Big/Small SOM grid size via SVD/PCA." },
+            new { name = "knomap_train_som", description = "Trains Kohonen SOM neural map with U-Matrix, UMAP, and clustering." },
+            new { name = "knomap_render_visual_artifact", description = "Generates self-contained interactive HTML5/SVG map artifacts." },
+            new { name = "knomap_estimate_intrinsic_dimension", description = "Estimates intrinsic dimensionality via skdim (MLE)." },
+            new { name = "knomap_save_project", description = "Persists projects to .knomap file and SQLite zero-config hub." },
+            new { name = "knomap_get_project", description = "Retrieves stored projects from SQLite or disk." }
+        }
+    });
+});
+
+// Autonomous Agent Chat Endpoint (PicoClaw / Native Agent Loop)
+app.MapPost("/api/agent/chat", async (HttpContext ctx) =>
+{
+    try
+    {
+        using var reader = new StreamReader(ctx.Request.Body);
+        var body = await reader.ReadToEndAsync();
+        string userPrompt = "";
+        string? apiKey = null, baseUrl = null, model = null;
+        string? projectContextJson = null;
+
+        if (!string.IsNullOrWhiteSpace(body))
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("prompt", out var p)) userPrompt = p.GetString() ?? "";
+            if (doc.RootElement.TryGetProperty("apiKey", out var k)) apiKey = k.GetString();
+            if (doc.RootElement.TryGetProperty("baseUrl", out var u)) baseUrl = u.GetString();
+            if (doc.RootElement.TryGetProperty("model", out var m)) model = m.GetString();
+            if (doc.RootElement.TryGetProperty("projectContext", out var pc)) projectContextJson = pc.GetRawText();
+        }
+
+        if (string.IsNullOrWhiteSpace(userPrompt))
+        {
+            return Results.BadRequest(new { success = false, error = "Prompt is required." });
+        }
+
+        string engineDir = GetEngineDirectory();
+        string bridgeScript = Path.Combine(engineDir, "agent_bridge.py");
+        string pythonExe = PythonUtils.GetPythonExecutablePath(engineDir);
+
+        string tempCtxPath = "";
+        if (!string.IsNullOrEmpty(projectContextJson))
+        {
+            string tempDir = Path.Combine(engineDir, "temp");
+            if (!Directory.Exists(tempDir)) Directory.CreateDirectory(tempDir);
+            tempCtxPath = Path.Combine(tempDir, $"agent_ctx_{Guid.NewGuid():N}.json");
+            await File.WriteAllTextAsync(tempCtxPath, projectContextJson);
+        }
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = pythonExe,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        psi.ArgumentList.Add(bridgeScript);
+        psi.ArgumentList.Add(userPrompt);
+        if (!string.IsNullOrEmpty(tempCtxPath))
+        {
+            psi.ArgumentList.Add(tempCtxPath);
+        }
+
+        if (!string.IsNullOrWhiteSpace(apiKey)) 
+            psi.EnvironmentVariables["LLM_API_KEY"] = apiKey;
+        else if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LLM_API_KEY")))
+            psi.EnvironmentVariables["LLM_API_KEY"] = Environment.GetEnvironmentVariable("LLM_API_KEY")!;
+
+        if (!string.IsNullOrWhiteSpace(baseUrl)) 
+            psi.EnvironmentVariables["LLM_BASE_URL"] = baseUrl;
+        else if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LLM_BASE_URL")))
+            psi.EnvironmentVariables["LLM_BASE_URL"] = Environment.GetEnvironmentVariable("LLM_BASE_URL")!;
+
+        if (!string.IsNullOrWhiteSpace(model)) 
+            psi.EnvironmentVariables["LLM_MODEL"] = model;
+        else if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LLM_MODEL")))
+            psi.EnvironmentVariables["LLM_MODEL"] = Environment.GetEnvironmentVariable("LLM_MODEL")!;
+
+        psi.EnvironmentVariables["PYTHONPATH"] = engineDir;
+
+
+        using var proc = new Process { StartInfo = psi };
+        proc.Start();
+        string stdout = await proc.StandardOutput.ReadToEndAsync();
+        string stderr = await proc.StandardError.ReadToEndAsync();
+        await proc.WaitForExitAsync();
+
+        if (!string.IsNullOrEmpty(tempCtxPath) && File.Exists(tempCtxPath))
+        {
+            try { File.Delete(tempCtxPath); } catch { }
+        }
+
+
+        if (proc.ExitCode == 0 && !string.IsNullOrWhiteSpace(stdout))
+        {
+            try
+            {
+                var parsedResponse = JsonDocument.Parse(stdout);
+                return Results.Ok(parsedResponse.RootElement);
+            }
+            catch
+            {
+                return Results.Ok(new { success = true, reply = stdout, steps = Array.Empty<object>(), artifacts = Array.Empty<object>() });
+            }
+        }
+        else
+        {
+            return Results.Ok(new { success = false, error = string.IsNullOrWhiteSpace(stderr) ? stdout : stderr });
+        }
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { success = false, error = ex.Message });
+    }
+});
+
 app.MapGet("/api/health", () => Results.Ok(new { status = "Healthy", app = "newknoMap Local API" }));
+
+
 
 // Fallback to index.html for Single Page Application (SPA) client-side routing
 app.MapFallbackToFile("index.html");

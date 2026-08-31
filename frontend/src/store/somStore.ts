@@ -3,25 +3,9 @@ import { type NormalizationInfo, type NormalizationType, applyNormalizationToMat
 import { applyCmaSmoothing } from '../utils/timeSeries';
 import { useAiStore } from './aiStore';
 
-// Helper to resolve API URLs dynamically based on deployment environment
-export const getApiUrl = (path: string): string => {
-  // 1. Desktop protocol fallback (Photino loading via file:// or about:)
-  const isFileProtocol = typeof window !== 'undefined' && window.location && (window.location.protocol === 'file:' || window.location.protocol === 'about:' || !window.location.host);
-  if (isFileProtocol) {
-    return `http://127.0.0.1:19080${path}`;
-  }
-  
-  // 2. Production browser context served under a subdirectory path (e.g., /knoMap/ or /knomap/)
-  if (typeof window !== 'undefined' && window.location) {
-    const match = window.location.pathname.match(/^\/knomap/i);
-    if (match) {
-      return `${match[0]}${path}`;
-    }
-  }
-  
-  // 3. Standard relative API calls (Works for desktop webview2 on port 19080 and web server)
-  return path;
-};
+export { getApiUrl } from '../utils/api';
+import { getApiUrl } from '../utils/api';
+
 
 export interface SOMConfig {
   rows: number;
@@ -912,44 +896,19 @@ export const useSomStore = create<SOMState>((set, get) => ({
     let currentLabels: string[] = [];
     let normInfo = state.normalizationInfo;
 
-    const isTemporal = state.networksByYear && Object.keys(state.networksByYear).length > 0;
-
-    if (isTemporal && state.networksByYear) {
-      // Temporal Stack: Parse each year, normalize it, then stack
-      const years = Object.keys(state.networksByYear).sort();
-      for (const year of years) {
-        const yNet = state.networksByYear[year];
-        if (yNet.cooccurrence_csv) {
-          const parsed = parseRawCsvToMatrix(yNet.cooccurrence_csv);
-          if (parsed) {
-            let yMatrix = parsed.matrix;
-            if (normInfo?.type) {
-              const { normalizedMatrix } = applyNormalizationToMatrix(yMatrix, normInfo.type);
-              yMatrix = normalizedMatrix;
-            }
-            
-            for (let i = 0; i < yMatrix.length; i++) {
-              currentMatrix.push(yMatrix[i]);
-              currentLabels.push(`${year}_${parsed.documentLabels[i]}`);
-            }
-          }
-        }
-      }
-    } else {
-      // Standard flow
-      if (!state.originalDataMatrix) return {};
-      currentMatrix = state.originalDataMatrix;
-      currentLabels = state.labels;
-      
-      if (normInfo?.type) {
-        const { normalizedMatrix, scalerInfo } = applyNormalizationToMatrix(currentMatrix, normInfo.type);
-        currentMatrix = normalizedMatrix;
-        normInfo = scalerInfo;
-      }
+    // Standard flow (now used for Bibliometrics as well, treating them as static matrices)
+    if (!state.originalDataMatrix) return {};
+    currentMatrix = state.originalDataMatrix;
+    currentLabels = state.labels;
+    
+    if (normInfo?.type) {
+      const { normalizedMatrix, scalerInfo } = applyNormalizationToMatrix(currentMatrix, normInfo.type);
+      currentMatrix = normalizedMatrix;
+      normInfo = scalerInfo;
     }
     
-    // 2. Smooth (CMA)
-    if (state.isCmaSmoothingActive && isTemporal) {
+    // 2. Smooth (CMA) - Only applies if the matrix was already a temporal stack (e.g. InCites)
+    if (state.isCmaSmoothingActive) {
       currentMatrix = applyCmaSmoothing(currentMatrix, currentLabels, state.cmaWindowSize);
     }
     

@@ -21,6 +21,9 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
       - JWT_SECRET=${JWT_SECRET:-knomap_super_secret_jwt_key_2026_change_in_production_environment_998877665544332211}
       - DOTNET_RUNNING_IN_CONTAINER=true
+      - LLM_BASE_URL=${LLM_BASE_URL:-http://172.17.0.1:1234/v1}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-default}
     volumes:
       - knomap_data:/app/backend/App_Data
     restart: unless-stopped

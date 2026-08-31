@@ -23,7 +23,7 @@ const PRESETS: Preset[] = [
     desc: 'UNAM LDNL academic server (API key required)',
     icon: <Server className="w-4 h-4 text-indigo-400" />,
     baseUrl: 'https://dinamica1.fciencias.unam.mx/v1/',
-    model: 'openai/gpt-oss-20b',
+    model: 'default',
     requiresKey: true,
     keyPlaceholder: 'Enter your API key'
   },
@@ -46,6 +46,26 @@ const PRESETS: Preset[] = [
     model: 'gpt-4o',
     requiresKey: true,
     keyPlaceholder: 'sk-...'
+  },
+  {
+    id: 'gemini-flash',
+    name: 'Google AI (Gemini 2.0 Flash)',
+    desc: 'Google Gemini 2.0 Flash: Sub-second latency and multimodal reasoning',
+    icon: <Sparkles className="w-4 h-4 text-blue-400" />,
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    model: 'gemini-2.0-flash',
+    requiresKey: true,
+    keyPlaceholder: 'AIzaSy...'
+  },
+  {
+    id: 'gemini-pro',
+    name: 'Google AI (Gemini 1.5 Pro)',
+    desc: 'Google Gemini 1.5 Pro: Deep reasoning & 2M token context window',
+    icon: <Zap className="w-4 h-4 text-cyan-400" />,
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    model: 'gemini-1.5-pro',
+    requiresKey: true,
+    keyPlaceholder: 'AIzaSy...'
   },
   {
     id: 'lm-studio',
@@ -238,12 +258,12 @@ export const LlmConfigModal: React.FC = () => {
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
-                  <span>OpenAI API Key</span>
-                  <span className="text-[10px] text-gray-500 font-normal">(Bearer Token)</span>
+                  <span>API Key</span>
+                  <span className="text-[10px] text-gray-500 font-normal">(Bearer Token / Google AI / OpenAI)</span>
                 </label>
-                <div className="flex items-center text-[10px] text-gray-500 gap-1">
+                <div className="flex items-center text-[10px] text-emerald-400 gap-1 bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-500/30">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Stored locally on your device</span>
+                  <span>Cifrado en reposo (AES-GCM 256)</span>
                 </div>
               </div>
               <div className="relative">
@@ -254,7 +274,7 @@ export const LlmConfigModal: React.FC = () => {
                     setApiKey(e.target.value);
                     setTestResult(null);
                   }}
-                  placeholder="sk-proj-... (leave blank if your local server doesn't require a key)"
+                  placeholder="AIzaSy... / sk-... (dejar en blanco si tu servidor local no requiere clave)"
                   className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3.5 py-2.5 text-xs text-gray-200 font-mono focus:outline-none focus:border-indigo-500 pr-10"
                 />
                 <button

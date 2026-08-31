@@ -23,3 +23,7 @@ engine/temp/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Documentation / Paper
+docs/paper/
+

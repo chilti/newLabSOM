@@ -63,7 +63,7 @@ namespace LabSOM.Backend.Core.Services
             }
 
             baseUrl = string.IsNullOrEmpty(baseUrl) ? "https://dinamica1.fciencias.unam.mx/v1/" : baseUrl;
-            model = string.IsNullOrEmpty(model) ? "openai/gpt-oss-20b" : model;
+            model = string.IsNullOrEmpty(model) ? "default" : model;
             apiKey = string.IsNullOrEmpty(apiKey) ? "" : apiKey;
 
             return (baseUrl, model, apiKey);

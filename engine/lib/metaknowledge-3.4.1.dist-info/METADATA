@@ -1,0 +1,42 @@
+Metadata-Version: 2.1
+Name: metaknowledge
+Version: 3.4.1
+Summary: A library for handling Web of science files
+Home-page: https://github.com/networks-lab/metaknowledge
+Author: Reid McIlroy-Young, John McLevey
+Author-email: rmcilroy@uwaterloo.ca, john.mclevey@uwaterloo.ca
+License: GPL
+Download-URL: https://github.com/networks-lab/metaknowledge/archive/3.4.1.tar.gz
+Keywords: WOS
+Platform: UNKNOWN
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Environment :: Console
+Classifier: Environment :: MacOS X
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: GNU General Public License v2 (GPLv2)
+Classifier: Operating System :: MacOS :: MacOS X
+Classifier: Operating System :: POSIX
+Classifier: Operating System :: Microsoft :: Windows
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Topic :: Education
+Classifier: Topic :: Scientific/Engineering :: Information Analysis
+Classifier: Topic :: Sociology
+Classifier: Topic :: Text Processing
+Description-Content-Type: text/markdown
+Requires-Dist: networkx
+Provides-Extra: contour
+Requires-Dist: matplotlib ; extra == 'contour'
+Requires-Dist: scipy ; extra == 'contour'
+Requires-Dist: numpy ; extra == 'contour'
+
+<a href="https://uwaterloo.ca/networks-lab/"><img src="http://www.johnmclevey.com/assets/img/logo.png" width="125"  align="right" /></a>
+
+# metaknowledge
+
+`metaknowledge` is a Python3 package that simplifies bibliometric research using data from various sources. It reads a directory of plain text files containing meta-data on publications and citations, and writes to a variety of data structures that are suitable for quantitative, network, and text analyses. It handles large datasets (e.g. several million records) efficiently. You can find the [documentation](https://metaknowledge.readthedocs.io/).
+
+## Installing
+
+To install run `python3 setup.py install`
+
+
