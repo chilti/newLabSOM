@@ -24,6 +24,11 @@ engine/temp/
 .DS_Store
 Thumbs.db
 
+# Build artifacts & databases
+Output/
+*.db
+*.sqlite
+
 # Documentation / Paper
 docs/paper/
 

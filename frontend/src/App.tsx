@@ -15,7 +15,8 @@ import { UserManagementModal } from './components/UserManagementModal';
 import { ProjectsDrawer } from './components/ProjectsDrawer';
 import { LlmConfigModal } from './components/LlmConfigModal';
 import { VosApiModal } from './components/vos/VosApiModal';
-import { Database, Share2, Sliders, ArrowRight, RefreshCw, ChevronLeft, ChevronRight, Settings, Upload, Save, FolderOpen, FolderX, Layers, Compass, BarChart2, ChevronDown, BookOpen, Cloud, User as UserIcon, LogIn, LogOut, Shield, Bot, Key, TrendingUp } from 'lucide-react';
+import { EntityMergerModal } from './components/EntityMergerModal';
+import { Database, Share2, Sliders, ArrowRight, RefreshCw, ChevronLeft, ChevronRight, Settings, Upload, Save, FolderOpen, FolderX, Layers, Compass, BarChart2, ChevronDown, BookOpen, Cloud, User as UserIcon, LogIn, LogOut, Shield, Bot, Key, TrendingUp, GitMerge } from 'lucide-react';
 
 const isDesktopApp = typeof (window as any).external?.sendMessage === 'function';
 
@@ -46,6 +47,8 @@ export default function App() {
   const [biblioMainView, setBiblioMainView] = useState<'network' | 'longitudinal'>('network');
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isUserMgmtModalOpen, setIsUserMgmtModalOpen] = useState(false);
+
+  const [isEntityMergerOpen, setIsEntityMergerOpen] = useState(false);
   const [isProjectsDrawerOpen, setIsProjectsDrawerOpen] = useState(false);
   const [isSavingCloud, setIsSavingCloud] = useState(false);
 
@@ -903,9 +906,19 @@ export default function App() {
                             type="button"
                             onClick={() => thesaurusInputRef.current?.click()}
                             className="px-3 py-1.5 bg-gray-950 hover:bg-gray-800 border border-gray-800 text-gray-300 hover:text-white text-xs font-bold rounded-xl transition flex items-center space-x-1.5"
+                            title="Upload CSV or TXT thesaurus mapping"
                           >
                             <Upload className="w-3.5 h-3.5" />
-                            <span>Select Thesaurus .txt</span>
+                            <span>Upload File</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsEntityMergerOpen(true)}
+                            className="px-3 py-1.5 bg-indigo-900/40 hover:bg-indigo-800 border border-indigo-800/60 text-indigo-300 hover:text-white text-xs font-bold rounded-xl transition flex items-center space-x-1.5"
+                            title="Merge nodes interactively from current network"
+                          >
+                            <GitMerge className="w-3.5 h-3.5" />
+                            <span>Interactive Merger</span>
                           </button>
                           <input
                             type="file"
@@ -1225,6 +1238,22 @@ export default function App() {
       <VosApiModal
         isOpen={showApiModal}
         onClose={() => setShowApiModal(false)}
+      />
+      {/* Entity Merger Modal */}
+      <EntityMergerModal
+        isOpen={isEntityMergerOpen}
+        onClose={() => setIsEntityMergerOpen(false)}
+        existingThesaurusFile={thesaurusFile}
+        onApply={(mergesCsvFile) => {
+          setThesaurusFile(mergesCsvFile);
+          // Auto-trigger preprocess if a main file is already selected
+          if (sharedBibFile) {
+            setTimeout(() => {
+              const formEvent = { preventDefault: () => {} } as React.FormEvent;
+              handlePreprocess(formEvent);
+            }, 100);
+          }
+        }}
       />
     </>
   );

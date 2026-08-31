@@ -197,6 +197,9 @@ interface SOMState {
   cooccurrenceCsv: string | null;
   pendingNetworkCsv: string | null;
   pendingNetworkOrigin: 'monothematic' | 'bipartite' | null;
+  edaReport: any | null;
+  sankeyData: any | null;
+  termGrowth: any | null;
   
   // Longitudinal SOM & Subperiod State
   temporalWindow: number;
@@ -291,9 +294,9 @@ interface SOMState {
   setExploSomColorScale: (scale: 'standard' | 'viridis' | 'cividis') => void;
 
   // RedBibliometrica UI preferences
-  biblioActiveView: 'vosviewer' | 'force' | 'graph' | 'matrix';
+  biblioActiveView: 'vosviewer' | 'force' | 'graph' | 'matrix' | 'eda';
   biblioSelectedYear: string;
-  setBiblioActiveView: (view: 'vosviewer' | 'force' | 'graph' | 'matrix') => void;
+  setBiblioActiveView: (view: 'vosviewer' | 'force' | 'graph' | 'matrix' | 'eda') => void;
   setBiblioSelectedYear: (year: string) => void;
   
   // InCites Data State
@@ -543,6 +546,9 @@ export const useSomStore = create<SOMState>((set, get) => ({
   pendingNetworkCsv: null,
   pendingNetworkOrigin: null,
   result: null,
+  edaReport: null,
+  sankeyData: null,
+  termGrowth: null,
 
   // Dim Reduction persistent state
   dimData: null,
@@ -1056,6 +1062,9 @@ export const useSomStore = create<SOMState>((set, get) => ({
           vosviewerJson: result.vosviewer_json || null,
           networksByYear: result.networks_by_year || null,
           cooccurrenceMatricesByPeriod: result.cooccurrence_matrices_by_period || null,
+          edaReport: result.eda_report || null,
+          sankeyData: result.sankey_data || null,
+          termGrowth: result.term_growth || null,
           temporalWindow: effectiveWindow,
           temporalAnalysisMode: autoMode,
           cooccurrenceCsv: result.cooccurrence_csv || null,
@@ -1138,6 +1147,9 @@ export const useSomStore = create<SOMState>((set, get) => ({
           vosviewerJson: result.vosviewer_json || null,
           networksByYear: result.networks_by_year || null,
           cooccurrenceCsv: result.cooccurrence_csv || null,
+          edaReport: result.eda_report || null,
+          sankeyData: result.sankey_data || null,
+          termGrowth: result.term_growth || null,
           biblioActiveView: 'force',
           isPreprocessing: false,
           pendingProvenance: {
@@ -1528,6 +1540,11 @@ export const useSomStore = create<SOMState>((set, get) => ({
       cooccurrenceCsv: state.cooccurrenceCsv,
       pendingNetworkCsv: state.pendingNetworkCsv,
       pendingNetworkOrigin: state.pendingNetworkOrigin,
+      
+      // EDA Metrics
+      edaReport: state.edaReport,
+      sankeyData: state.sankeyData,
+      termGrowth: state.termGrowth,
       cooccurrenceMatricesByPeriod: state.cooccurrenceMatricesByPeriod,
       temporalWindow: state.temporalWindow,
       temporalAnalysisMode: state.temporalAnalysisMode,
@@ -1645,6 +1662,12 @@ export const useSomStore = create<SOMState>((set, get) => ({
           cooccurrenceCsv: projectData.cooccurrenceCsv || null,
           pendingNetworkCsv: projectData.pendingNetworkCsv || null,
           pendingNetworkOrigin: projectData.pendingNetworkOrigin || null,
+          
+          // EDA Metrics
+          edaReport: projectData.edaReport || null,
+          sankeyData: projectData.sankeyData || null,
+          termGrowth: projectData.termGrowth || null,
+          
           result: projectData.result || null,
           isCmaSmoothingActive: projectData.isCmaSmoothingActive || false,
           cmaWindowSize: projectData.cmaWindowSize || 3,

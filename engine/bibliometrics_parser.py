@@ -12,6 +12,7 @@ for _cls in (nx.Graph, nx.DiGraph, nx.MultiGraph, nx.MultiDiGraph):
         _cls.node = property(lambda self: self.nodes)
 import pandas as pd
 import metaknowledge as mk
+import biblio_eda_engine
 
 from vos_thesaurus import VosThesaurus
 from vos_nlp import extract_noun_phrases, filter_top_relevant_terms, calculate_relevance_scores
@@ -667,6 +668,14 @@ def _finalize_network(global_graph, records, network_type, custom_tag,
         "cooccurrence_csv": cooccurrence_csv,
         "temporal_window": temporal_window
     }
+    
+    # Add EDA Analysis
+    try:
+        result["eda_report"] = biblio_eda_engine.generate_eda_report(records)
+        result["sankey_data"] = biblio_eda_engine.generate_sankey_data(records)
+        result["term_growth"] = biblio_eda_engine.generate_term_growth(records)
+    except Exception as e:
+        result["eda_report"] = {"success": False, "error": str(e)}
     if temporal:
         result["networks_by_year"] = networks_by_year
         result["cooccurrence_matrices_by_period"] = cooccurrence_matrices_by_period
@@ -1517,6 +1526,15 @@ def _metaknowledge_process(filepath, network_type, custom_tag,
         "cooccurrence_csv": cooccurrence_csv,
         "temporal_window": temporal_window
     }
+    
+    # Add EDA Analysis
+    try:
+        recs_list = list(RC)
+        result_dict["eda_report"] = biblio_eda_engine.generate_eda_report(recs_list)
+        result_dict["sankey_data"] = biblio_eda_engine.generate_sankey_data(recs_list)
+        result_dict["term_growth"] = biblio_eda_engine.generate_term_growth(recs_list)
+    except Exception as e:
+        result_dict["eda_report"] = {"success": False, "error": str(e)}
     if temporal:
         result_dict["networks_by_year"] = networks_by_year
         result_dict["cooccurrence_matrices_by_period"] = cooccurrence_matrices_by_period

@@ -5,6 +5,8 @@ import { Share2, Users, FileText, Info, ArrowRight, Eye, Layers, Table, Download
 import { SendToAssistantButton } from './SendToAssistantButton';
 import { VosViewerContainer, networkToVosJson } from './vos/VosViewerContainer';
 import { VosExportModal } from './vos/VosExportModal';
+import { BiblioEdaReport } from './BiblioEdaReport';
+import { BarChart2 } from 'lucide-react';
 
 interface ForceNode extends d3Force.SimulationNodeDatum {
   id: string;
@@ -63,10 +65,10 @@ export const RedBibliometrica: React.FC = () => {
   const [onlyLargestComponent, setOnlyLargestComponent] = useState<boolean>(false);
   const [showExportModal, setShowExportModal] = useState<boolean>(false);
 
-  // Sub-view: 'force' (Default) | 'matrix' | 'vosviewer'
-  const viewerMode: 'force' | 'matrix' | 'vosviewer' = 
-    (biblioActiveView === 'vosviewer' || biblioActiveView === 'matrix') ? biblioActiveView : 'force';
-  const setViewerMode = (mode: 'force' | 'matrix' | 'vosviewer') => setBiblioActiveView(mode);
+  // Sub-view: 'force' (Default) | 'matrix' | 'vosviewer' | 'eda'
+  const viewerMode: 'force' | 'matrix' | 'vosviewer' | 'eda' = 
+    (biblioActiveView === 'vosviewer' || biblioActiveView === 'matrix' || biblioActiveView === 'eda') ? biblioActiveView : 'force';
+  const setViewerMode = (mode: 'force' | 'matrix' | 'vosviewer' | 'eda') => setBiblioActiveView(mode);
 
   const selectedYear = biblioSelectedYear;
   const setSelectedYear = setBiblioSelectedYear;
@@ -509,6 +511,16 @@ export const RedBibliometrica: React.FC = () => {
               <Eye className="w-3.5 h-3.5" />
               <span>VOSviewer Map</span>
             </button>
+            <button
+              onClick={() => setViewerMode('eda')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all flex items-center space-x-1.5 ${
+                viewerMode === 'eda' ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'
+              }`}
+              title="Exploratory Data Analysis & Author Metrics"
+            >
+              <BarChart2 className="w-3.5 h-3.5" />
+              <span>EDA Metrics</span>
+            </button>
           </div>
 
           {/* Temporal Period Selector */}
@@ -610,7 +622,9 @@ export const RedBibliometrica: React.FC = () => {
 
       {/* Main Visualizer Area */}
       <div className="flex-1 relative bg-gray-950 rounded-xl overflow-hidden border border-gray-800 flex items-center justify-center min-h-[620px]">
-        {viewerMode === 'vosviewer' ? (
+        {viewerMode === 'eda' ? (
+          <BiblioEdaReport />
+        ) : viewerMode === 'vosviewer' ? (
           <VosViewerContainer
             data={currentVosData}
             onlyLargestComponent={onlyLargestComponent}
