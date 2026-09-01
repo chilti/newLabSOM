@@ -11,14 +11,17 @@ for _cls in (nx.Graph, nx.DiGraph, nx.MultiGraph, nx.MultiDiGraph):
     if not hasattr(_cls, 'node'):
         _cls.node = property(lambda self: self.nodes)
 import pandas as pd
-import metaknowledge as mk
+try:
+    import metaknowledge as mk
+except ImportError:
+    mk = None
 import biblio_eda_engine
 
 from vos_thesaurus import VosThesaurus
 from vos_nlp import extract_noun_phrases, filter_top_relevant_terms, calculate_relevance_scores
 from vos_parsers import (
-    is_dimensions_csv, is_lens_csv, is_openalex_csv, is_vos_native_file,
-    parse_dimensions_csv, parse_lens_csv, parse_openalex_csv, parse_vos_native_json
+    is_dimensions_csv, is_lens_csv, is_openalex_csv, is_openalex_json, is_vos_native_file,
+    parse_dimensions_csv, parse_lens_csv, parse_openalex_csv, parse_openalex_json, parse_vos_native_json
 )
 
 
@@ -986,6 +989,16 @@ def read_and_generate_bibliometrics(
     # ── Route OpenAlex CSV exports ────────────────────────────────────────────
     if is_openalex_csv(filepath):
         records = parse_openalex_csv(filepath)
+        return _process_record_list(
+            records, network_type, custom_tag, max_terms, min_cooccurrence, temporal,
+            extraction_source=extraction_source, counting_method=counting_method,
+            thesaurus_filepath=thesaurus_filepath, relevance_ratio=relevance_ratio,
+            temporal_window=temporal_window
+        )
+
+    # ── Route OpenAlex JSON / JSONL exports ───────────────────────────────────
+    if is_openalex_json(filepath):
+        records = parse_openalex_json(filepath)
         return _process_record_list(
             records, network_type, custom_tag, max_terms, min_cooccurrence, temporal,
             extraction_source=extraction_source, counting_method=counting_method,

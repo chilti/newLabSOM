@@ -265,6 +265,48 @@ app.MapGet("/api/incites/baseline", async (InCitesService service) =>
         "application/json");
 });
 
+// 2.6 TlachIA Metrics Endpoints (Aliases / Specialized Routes)
+app.MapPost("/api/tlachia/process", async (HttpRequest req, InCitesService service) =>
+{
+    if (!req.HasFormContentType || req.Form.Files.Count == 0)
+    {
+        return Results.BadRequest(new { success = false, error = "No files uploaded." });
+    }
+
+    var files = req.Form.Files.ToList();
+    var result = await service.ProcessInCitesFilesAsync(files);
+    
+    if (!result.Success)
+    {
+        return Results.Json(result, statusCode: 500);
+    }
+    return Results.Ok(result);
+});
+
+app.MapGet("/api/tlachia/unit/{unitName}", async (string unitName, InCitesService service) =>
+{
+    var result = await service.GetUnitDataAsync(unitName);
+    if (!result.Success)
+    {
+        return Results.Json(new { success = false, error = result.Error }, statusCode: 404);
+    }
+    return Results.Content(
+        $"{{\"success\":true,\"unit_name\":\"{unitName}\",\"unit\":{result.UnitDataRaw}}}",
+        "application/json");
+});
+
+app.MapGet("/api/tlachia/baseline", async (InCitesService service) =>
+{
+    var rawBaseline = await service.GetBaselineDataRawAsync();
+    if (string.IsNullOrEmpty(rawBaseline))
+    {
+        return Results.Json(new { success = false, error = "No baseline data found" }, statusCode: 404);
+    }
+    return Results.Content(
+        $"{{\"success\":true,\"baseline\":{rawBaseline}}}",
+        "application/json");
+});
+
 
 // 3. SOM and UMAP Training Endpoint
 app.MapPost("/api/som/suggest_size", async (SuggestSizeRequest request, SOMEngineService engine) =>

@@ -86,7 +86,7 @@ export interface SemanticRecord {
 }
 
 export interface DataProvenance {
-  originType: 'incites' | 'bibliometrics' | 'dimreduction' | 'csv_upload';
+  originType: 'incites' | 'tlachia' | 'bibliometrics' | 'dimreduction' | 'csv_upload';
   unitName?: string;              // e.g. "Locations", "Researchers", "Departments"
   subView?: string;               // e.g. "Heatmap Matrix", "Evolution Profile", "Quartiles"
   indicatorsCount?: number;       // number of features used
@@ -137,7 +137,7 @@ interface SOMState {
   isGeneratingUmap: boolean;
   isPreprocessing: boolean;
   uploadProgress: number | null;
-  activeTab: 'multidimensional' | 'temporal' | 'bibliometrics' | 'dimreduction' | 'semantic_bibliometrics' | 'incites' | 'asistente';
+  activeTab: 'multidimensional' | 'temporal' | 'bibliometrics' | 'dimreduction' | 'semantic_bibliometrics' | 'incites' | 'tlachia_metrics' | 'asistente';
   
   // Experiment History (Multi-Training Runs)
   savedRuns: SomRun[];
@@ -331,10 +331,42 @@ interface SOMState {
     incitesIsFilterModalOpen: boolean
   }>) => void;
   uploadInCitesFiles: (formData: FormData) => Promise<void>;
+  // TlachIA Metrics Data State
+  tlachiaUnitNames: string[] | null;
+  tlachiaUnitCache: Record<string, any>;
+  tlachiaLlmCache: Record<string, string>;
+  tlachiaActiveUnit: string | null;
+  tlachiaSidebarTab: 'profiles' | 'temporal';
+  tlachiaIsUploading: boolean;
+  tlachiaBaseline: any | null;
+  tlachiaSelectedBaselineSource: string | null;
+  tlachiaLimitTop50: boolean;
+  tlachiaFilterIndicator: string;
+  tlachiaFilterMinValue: number | string;
+  tlachiaIsFilterActive: boolean;
+  tlachiaIsFilterModalOpen: boolean;
+  setTlachiaState: (state: Partial<{
+    tlachiaUnitNames: string[] | null,
+    tlachiaUnitCache: Record<string, any>,
+    tlachiaLlmCache: Record<string, string>,
+    tlachiaActiveUnit: string | null,
+    tlachiaSidebarTab: 'profiles' | 'temporal',
+    tlachiaIsUploading: boolean,
+    tlachiaBaseline: any | null,
+    tlachiaSelectedBaselineSource: string | null,
+    tlachiaLimitTop50: boolean,
+    tlachiaFilterIndicator: string,
+    tlachiaFilterMinValue: number | string,
+    tlachiaIsFilterActive: boolean,
+    tlachiaIsFilterModalOpen: boolean
+  }>) => void;
+  uploadTlachIAFiles: (formData: FormData) => Promise<void>;
+  ensureAllTlachiaUnitsCached: () => Promise<void>;
+
   
   // Setters & Actions
   setConfig: (config: Partial<SOMConfig>) => void;
-  setActiveTab: (tab: 'multidimensional' | 'temporal' | 'bibliometrics' | 'dimreduction' | 'semantic_bibliometrics' | 'incites' | 'asistente') => void;
+  setActiveTab: (tab: 'multidimensional' | 'temporal' | 'bibliometrics' | 'dimreduction' | 'semantic_bibliometrics' | 'incites' | 'tlachia_metrics' | 'asistente') => void;
   fetchSystemStatus: () => Promise<void>;
   loadCsvData: (csvText: string, labelColIndex?: number, ignoreCols?: number[], origin?: 'csv' | 'monothematic' | 'bipartite', fileName?: string, provenance?: DataProvenance) => void;
   applyNormalization: (type: NormalizationType) => void;
@@ -659,6 +691,25 @@ export const useSomStore = create<SOMState>((set, get) => ({
         incitesIsUploading: false
       });
 
+      // If OpenAlex JSON production is present, sync to Biblio Networks and Semantic Biblio
+      if (data.openalex_data && data.openalex_data.has_json) {
+        const oa = data.openalex_data;
+        set({
+          documentCount: oa.document_count || 0,
+          termCounts: oa.term_counts || {},
+          network: oa.network || null,
+          networksByYear: oa.networks_by_year || null,
+          cooccurrenceCsv: oa.cooccurrence_csv || null,
+          semanticRecords: oa.semantic_records || null,
+          semanticFileName: oa.json_file_name || 'OpenAlex Production',
+          semanticEmbeddings: null,
+          semanticIntrinsicData: null,
+          semantic2DCoords: null,
+          semanticClusters: null,
+          semanticClusterAssignment: null
+        });
+      }
+
       // Background pre-fetch all unit tabs so saved projects are 100% self-contained
       names.forEach(async (unitName) => {
         try {
@@ -677,6 +728,148 @@ export const useSomStore = create<SOMState>((set, get) => ({
       alert('Upload failed: ' + err);
       set({ incitesIsUploading: false });
     }
+  },
+
+  // TlachIA Metrics Data State
+  tlachiaUnitNames: null,
+  tlachiaUnitCache: {},
+  tlachiaLlmCache: {},
+  tlachiaActiveUnit: null,
+  tlachiaSidebarTab: 'profiles',
+  tlachiaIsUploading: false,
+  tlachiaBaseline: null,
+  tlachiaSelectedBaselineSource: null,
+  tlachiaLimitTop50: true,
+  tlachiaFilterIndicator: '',
+  tlachiaFilterMinValue: '',
+  tlachiaIsFilterActive: false,
+  tlachiaIsFilterModalOpen: false,
+  setTlachiaState: (newState) => set((state) => ({ ...state, ...newState })),
+  uploadTlachIAFiles: async (formData: FormData) => {
+    set({
+      tlachiaIsUploading: true,
+      tlachiaUnitNames: null,
+      tlachiaUnitCache: {},
+      tlachiaLlmCache: {},
+      tlachiaActiveUnit: null,
+      tlachiaBaseline: null,
+      tlachiaSelectedBaselineSource: null
+    });
+
+    try {
+      const response = await fetch(getApiUrl('/api/tlachia/process'), {
+        method: 'POST',
+        body: formData
+      });
+      const data = await response.json();
+
+      if (!data.success) {
+        alert('Error procesando TlachIA Metrics: ' + data.error);
+        set({ tlachiaIsUploading: false });
+        return;
+      }
+
+      const rawNames: string[] = data.unit_names ?? [];
+      const PREFERRED_TLACHIA_ORDER = [
+        'Locations',
+        'Locations Subnational',
+        'Organizations',
+        'Organizations Colab',
+        'Sector Types',
+        'Researchers',
+        'Publication Sources',
+        'Funding Agencies',
+        'Macro Topics',
+        'Meso Topics',
+        'Micro Topics',
+        'ESI',
+        'SDG',
+        'Concepts',
+        'Keywords',
+        'Economic APC Breakdown'
+      ];
+      const names = [...rawNames].sort((a, b) => {
+        const idxA = PREFERRED_TLACHIA_ORDER.indexOf(a);
+        const idxB = PREFERRED_TLACHIA_ORDER.indexOf(b);
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+        if (idxA !== -1) return -1;
+        if (idxB !== -1) return 1;
+        return a.localeCompare(b);
+      });
+
+      const baselineData = data.baseline || null;
+      const defaultSource = baselineData?.default_source || null;
+      const defaultUnit = names.includes('Locations') ? 'Locations' : (names[0] || null);
+
+      set({
+        tlachiaUnitNames: names,
+        tlachiaActiveUnit: defaultUnit,
+        tlachiaBaseline: baselineData,
+        tlachiaSelectedBaselineSource: defaultSource,
+        tlachiaIsUploading: false
+      });
+
+      // If OpenAlex JSON production is present, automatically load into Biblio Networks and Semantic Biblio
+      if (data.openalex_data && data.openalex_data.has_json) {
+        const oa = data.openalex_data;
+        set({
+          // Biblio Networks
+          documentCount: oa.document_count || 0,
+          termCounts: oa.term_counts || {},
+          network: oa.network || null,
+          networksByYear: oa.networks_by_year || null,
+          cooccurrenceCsv: oa.cooccurrence_csv || null,
+          // Semantic Biblio
+          semanticRecords: oa.semantic_records || null,
+          semanticFileName: oa.json_file_name || 'OpenAlex Production',
+          semanticEmbeddings: null,
+          semanticIntrinsicData: null,
+          semantic2DCoords: null,
+          semanticClusters: null,
+          semanticClusterAssignment: null
+        });
+      }
+
+      // Background pre-fetch all unit tabs
+      names.forEach(async (unitName) => {
+        try {
+          const res = await fetch(getApiUrl(`/api/tlachia/unit/${encodeURIComponent(unitName)}`));
+          const unitRes = await res.json();
+          if (unitRes.success && unitRes.unit) {
+            set((state) => ({
+              tlachiaUnitCache: { ...state.tlachiaUnitCache, [unitName]: unitRes.unit }
+            }));
+          }
+        } catch (e) {
+          console.warn(`Background pre-fetch warning for unit ${unitName}:`, e);
+        }
+      });
+    } catch (err) {
+      alert('Upload failed: ' + err);
+      set({ tlachiaIsUploading: false });
+    }
+  },
+
+  ensureAllTlachiaUnitsCached: async () => {
+    const { tlachiaUnitNames, tlachiaUnitCache } = get();
+    if (!tlachiaUnitNames || tlachiaUnitNames.length === 0) return;
+
+    const missingUnits = tlachiaUnitNames.filter(name => !tlachiaUnitCache[name]);
+    if (missingUnits.length === 0) return;
+
+    await Promise.all(missingUnits.map(async (unitName) => {
+      try {
+        const res = await fetch(getApiUrl(`/api/tlachia/unit/${encodeURIComponent(unitName)}`));
+        const unitRes = await res.json();
+        if (unitRes.success && unitRes.unit) {
+          set((state) => ({
+            tlachiaUnitCache: { ...state.tlachiaUnitCache, [unitName]: unitRes.unit }
+          }));
+        }
+      } catch (e) {
+        console.warn(`Pre-fetch error for unit ${unitName}:`, e);
+      }
+    }));
   },
 
   ensureAllIncitesUnitsCached: async () => {
@@ -1574,6 +1767,9 @@ export const useSomStore = create<SOMState>((set, get) => ({
       incitesUnitNames: state.incitesUnitNames,
       incitesUnitCache: state.incitesUnitCache,
       incitesActiveUnit: state.incitesActiveUnit,
+      tlachiaUnitNames: state.tlachiaUnitNames,
+      tlachiaUnitCache: state.tlachiaUnitCache,
+      tlachiaActiveUnit: state.tlachiaActiveUnit,
       incitesSidebarTab: state.incitesSidebarTab,
       incitesBaseline: state.incitesBaseline,
       incitesSelectedBaselineSource: state.incitesSelectedBaselineSource,

@@ -5,6 +5,7 @@ import { ExploradorDatos } from './components/ExploradorDatos';
 import { DimReduction } from './components/DimReduction';
 import { SemanticBibliometrics } from './components/SemanticBibliometrics';
 import { InCitesExplorer } from './components/InCitesExplorer';
+import { TlachIAMetricsExplorer } from './components/TlachIAMetricsExplorer';
 import { AiAssistantTab } from './components/AiAssistantTab';
 import { LongitudinalSomViewer } from './components/LongitudinalSomViewer';
 import { useAiStore } from './store/aiStore';
@@ -224,7 +225,7 @@ export default function App() {
     return <LoginScreen />;
   }
 
-  const handleTabChange = (newTab: 'multidimensional' | 'bibliometrics' | 'dimreduction' | 'semantic_bibliometrics' | 'incites' | 'asistente') => {
+  const handleTabChange = (newTab: 'multidimensional' | 'bibliometrics' | 'dimreduction' | 'semantic_bibliometrics' | 'incites' | 'tlachia_metrics' | 'asistente') => {
     const state = useSomStore.getState();
     if (newTab === 'multidimensional' && state.activeTab === 'bibliometrics') {
       if (state.pendingNetworkCsv) {
@@ -381,7 +382,7 @@ export default function App() {
 
                 {/* 3. Collapsible Bibliometrics Group */}
                 {(() => {
-                  const isChildActive = activeTab === 'bibliometrics' || activeTab === 'semantic_bibliometrics' || activeTab === 'incites';
+                  const isChildActive = activeTab === 'bibliometrics' || activeTab === 'semantic_bibliometrics' || activeTab === 'incites' || activeTab === 'tlachia_metrics';
                   const isOpen = isBiblioMenuOpen || (isSidebarCollapsed && isChildActive);
 
                   return (
@@ -457,6 +458,22 @@ export default function App() {
                             <span className="flex items-center">
                               <BarChart2 className={`w-3.5 h-3.5 ${isSidebarCollapsed ? '' : 'mr-2.5'}`} />
                               {!isSidebarCollapsed && <span>InCites Data</span>}
+                            </span>
+                          </button>
+
+                          {/* Sub 4: TlachIA Metrics */}
+                          <button
+                            onClick={() => handleTabChange('tlachia_metrics')}
+                            title={isSidebarCollapsed ? "TlachIA Metrics" : undefined}
+                            className={`flex items-center ${isSidebarCollapsed ? 'justify-center px-0 py-2' : 'justify-between px-3 py-2'
+                              } rounded-lg text-xs font-semibold transition-all ${activeTab === 'tlachia_metrics'
+                                ? 'bg-cyan-600 text-white shadow-md shadow-cyan-950/40'
+                                : 'text-gray-400 hover:bg-gray-800/80 hover:text-gray-200'
+                              }`}
+                          >
+                            <span className="flex items-center">
+                              <Database className={`w-3.5 h-3.5 ${isSidebarCollapsed ? '' : 'mr-2.5'} text-cyan-400`} />
+                              {!isSidebarCollapsed && <span className="text-cyan-300">TlachIA Metrics</span>}
                             </span>
                           </button>
                         </div>
@@ -587,14 +604,17 @@ export default function App() {
                   {activeTab === 'dimreduction' && 'Dimensionality Estimation & Reduction'}
                   {activeTab === 'semantic_bibliometrics' && 'Semantic Bibliometrics'}
                   {activeTab === 'incites' && 'InCites Explorer'}
-                  {activeTab === 'asistente' && 'AI Assistant & Reports'}
+                  {activeTab === 'tlachia_metrics' && 'TlachIA Metrics Explorer'}
+                  {activeTab === 'asistente' && 'Sinapsis AI Assistant'}
                 </h2>
-                <p className="text-xs text-gray-500 mt-1">
-                  {activeTab === 'multidimensional' && 'Load CSV datasets and train your Self-Organizing Map (SOM).'}
-                  {activeTab === 'bibliometrics' && 'Extract and parse scientific metrics from PubMed/WoS to build co-occurrence networks.'}
-                  {activeTab === 'dimreduction' && 'Estimate intrinsic dimensionality and reduce feature space using UMAP before training.'}
-                  {activeTab === 'semantic_bibliometrics' && 'Process documents semantically using AI embeddings, UMAP, and hierarchical clustering.'}
+                <p className="text-xs text-gray-400">
+                  {activeTab === 'multidimensional' && 'Train and project multi-feature vectors using Self-Organizing Maps.'}
+                  {activeTab === 'temporal' && 'Explore longitudinal research fronts and alluvial cluster evolution over time.'}
+                  {activeTab === 'bibliometrics' && 'Compute co-occurrence matrices and keyword graphs.'}
+                  {activeTab === 'dimreduction' && 'Estimate intrinsic dimensionality and compare UMAP, PCA, and t-SNE projections.'}
+                  {activeTab === 'semantic_bibliometrics' && 'Embed textual abstracts, estimate intrinsic dimension with MLE, and reduce to semantic manifolds.'}
                   {activeTab === 'incites' && 'Analyze institutional and country metrics across InCites units.'}
+                  {activeTab === 'tlachia_metrics' && 'Analyze OpenAlex multidimensional indicators, Diamond Open Access, APC economics, and taxonomy trees.'}
                   {activeTab === 'asistente' && 'Interpret quantitative visualizations, formulate hypotheses, and compile interactive reports with the local model.'}
                 </p>
               </div>
@@ -728,6 +748,11 @@ export default function App() {
               {/* Tab 5: InCites Explorer */}
               {activeTab === 'incites' && (
                 <InCitesExplorer />
+              )}
+
+              {/* Tab 5b: TlachIA Metrics Explorer */}
+              {activeTab === 'tlachia_metrics' && (
+                <TlachIAMetricsExplorer />
               )}
 
               {/* Tab 6: Asistente IA */}

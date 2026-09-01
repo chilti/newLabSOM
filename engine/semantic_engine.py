@@ -5,7 +5,10 @@ import re
 import time
 import numpy as np
 import pandas as pd
-import metaknowledge as mk
+try:
+    import metaknowledge as mk
+except ImportError:
+    mk = None
 
 # For UMAP and skdim
 import umap
@@ -19,6 +22,7 @@ from dotenv import load_dotenv
 
 from vos_parsers import (
     is_openalex_csv, parse_openalex_csv,
+    is_openalex_json, parse_openalex_json,
     is_dimensions_csv, parse_dimensions_csv,
     is_lens_csv, parse_lens_csv
 )
@@ -107,6 +111,8 @@ def handle_parse(params):
     raw_recs = None
     if is_openalex_csv(filepath):
         raw_recs = parse_openalex_csv(filepath)
+    elif is_openalex_json(filepath):
+        raw_recs = parse_openalex_json(filepath)
     elif is_dimensions_csv(filepath):
         raw_recs = parse_dimensions_csv(filepath)
     elif is_lens_csv(filepath):

@@ -389,23 +389,24 @@ def process_unit(unit_name, df_whole, df_5years, df_trend, all_units_dfs=None, a
 
         numeric_cols = ent_df.select_dtypes(include=[np.number]).columns.tolist()
 
-        if 'Web of Science Documents' in numeric_cols:
+        doc_col = 'Web of Science Documents' if 'Web of Science Documents' in numeric_cols else ('Documents' if 'Documents' in numeric_cols else None)
+        if doc_col:
             if not baseline_df.empty:
-                wos_baseline = baseline_df['Web of Science Documents'].sum()
+                wos_baseline = baseline_df[doc_col].sum()
                 if wos_baseline > 0:
-                    ent_df['Share'] = (ent_df['Web of Science Documents'] / wos_baseline) * 100
+                    ent_df['Share'] = (ent_df[doc_col] / wos_baseline) * 100
                     if 'Share' not in numeric_cols:
                         numeric_cols.append('Share')
 
             if 'Times Cited' in numeric_cols and 'Impact Factor' not in numeric_cols:
                 ent_df['Impact Factor'] = (
-                    ent_df['Times Cited'] / ent_df['Web of Science Documents'].replace(0, np.nan)
+                    ent_df['Times Cited'] / ent_df[doc_col].replace(0, np.nan)
                 ).fillna(0)
                 numeric_cols.append('Impact Factor')
 
             if 'Citations From Patents' in numeric_cols and 'Citations From Patents/Paper' not in numeric_cols:
                 ent_df['Citations From Patents/Paper'] = (
-                    ent_df['Citations From Patents'] / ent_df['Web of Science Documents'].replace(0, np.nan)
+                    ent_df['Citations From Patents'] / ent_df[doc_col].replace(0, np.nan)
                 ).fillna(0)
                 numeric_cols.append('Citations From Patents/Paper')
 
@@ -517,26 +518,27 @@ def process_unit(unit_name, df_whole, df_5years, df_trend, all_units_dfs=None, a
             if time_col in numeric_ts:
                 numeric_ts.remove(time_col)
 
-            if 'Web of Science Documents' in numeric_ts:
+            doc_ts_col = 'Web of Science Documents' if 'Web of Science Documents' in numeric_ts else ('Documents' if 'Documents' in numeric_ts else None)
+            if doc_ts_col:
                 if not baseline_df.empty:
-                    base_docs_per_year = baseline_df.groupby(time_col)['Web of Science Documents'].sum()
+                    base_docs_per_year = baseline_df.groupby(time_col)[doc_ts_col].sum()
                     def calc_share(row):
                         year = row[time_col]
                         b_docs = base_docs_per_year.get(year, 0)
                         if b_docs > 0:
-                            return (row['Web of Science Documents'] / b_docs) * 100
+                            return (row[doc_ts_col] / b_docs) * 100
                         return 0.0
                     trend_data['Share'] = trend_data.apply(calc_share, axis=1)
                     if 'Share' not in numeric_ts:
                         numeric_ts.append('Share')
 
-            if 'Times Cited' in numeric_ts and 'Impact Factor' not in numeric_ts:
-                trend_data['Impact Factor'] = (trend_data['Times Cited'] / trend_data['Web of Science Documents'].replace(0, np.nan)).fillna(0)
-                numeric_ts.append('Impact Factor')
+                if 'Times Cited' in numeric_ts and 'Impact Factor' not in numeric_ts:
+                    trend_data['Impact Factor'] = (trend_data['Times Cited'] / trend_data[doc_ts_col].replace(0, np.nan)).fillna(0)
+                    numeric_ts.append('Impact Factor')
 
-            if 'Citations From Patents' in numeric_ts and 'Citations From Patents/Paper' not in numeric_ts:
-                trend_data['Citations From Patents/Paper'] = (trend_data['Citations From Patents'] / trend_data['Web of Science Documents'].replace(0, np.nan)).fillna(0)
-                numeric_ts.append('Citations From Patents/Paper')
+                if 'Citations From Patents' in numeric_ts and 'Citations From Patents/Paper' not in numeric_ts:
+                    trend_data['Citations From Patents/Paper'] = (trend_data['Citations From Patents'] / trend_data[doc_ts_col].replace(0, np.nan)).fillna(0)
+                    numeric_ts.append('Citations From Patents/Paper')
 
             for indicator in numeric_ts:
                 series_data = []
@@ -809,9 +811,36 @@ def build_incites_inventory(payload_path):
     if not default_source and baseline_sources:
         default_source = list(baseline_sources.keys())[0]
 
+    # Auto-detect and parse OpenAlex JSON if present in the package
+    json_work_files = [f for f in extracted_files if f.endswith('.json') and not f.endswith('inventory.json') and not f.endswith('payload.json')]
+    openalex_json_data = None
+    if json_work_files:
+        json_file_path = json_work_files[0]
+        try:
+            from vos_parsers import is_openalex_json
+            if is_openalex_json(json_file_path):
+                from bibliometrics_parser import read_and_generate_bibliometrics
+                biblio_res = read_and_generate_bibliometrics(json_file_path, network_type='co-occurrence', max_terms=100)
+                from semantic_engine import handle_parse
+                semantic_res = handle_parse({'filepath': json_file_path, 'extract_title': True, 'extract_abstract': True, 'extract_keywords': True})
+                
+                openalex_json_data = {
+                    'has_json': True,
+                    'json_file_name': os.path.basename(json_file_path),
+                    'document_count': biblio_res.get('document_count', len(semantic_res.get('records', []))),
+                    'network': biblio_res.get('network'),
+                    'networks_by_year': biblio_res.get('networks_by_year'),
+                    'cooccurrence_csv': biblio_res.get('cooccurrence_csv'),
+                    'term_counts': biblio_res.get('term_counts', {}),
+                    'semantic_records': semantic_res.get('records')
+                }
+        except Exception as err:
+            warnings.warn(f'Error processing OpenAlex JSON in session: {err}')
+
     inventory_map = {
         "session_dir": session_dir,
-        "units": units
+        "units": units,
+        "openalex_data": openalex_json_data
     }
     with open(os.path.join(session_dir, "inventory.json"), 'w', encoding='utf-8') as f:
         json.dump(inventory_map, f, ensure_ascii=False)
@@ -823,7 +852,8 @@ def build_incites_inventory(payload_path):
         "baseline": {
             "default_source": default_source,
             "sources": baseline_sources
-        }
+        },
+        "openalex_data": openalex_json_data
     }
 
 

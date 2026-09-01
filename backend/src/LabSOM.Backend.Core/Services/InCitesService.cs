@@ -176,13 +176,20 @@ namespace LabSOM.Backend.Core.Services
                     baselineEl = bProp.Clone();
                 }
 
+                JsonElement? openAlexEl = null;
+                if (root.TryGetProperty("openalex_data", out var oaProp))
+                {
+                    openAlexEl = oaProp.Clone();
+                }
+
                 _resultFilePath = resultFile;
 
                 return new InCitesUploadResult
                 {
                     Success = true,
                     UnitNames = _unitNames,
-                    Baseline = baselineEl
+                    Baseline = baselineEl,
+                    OpenAlexData = openAlexEl
                 };
             }
             catch (Exception ex)
@@ -327,6 +334,9 @@ namespace LabSOM.Backend.Core.Services
 
         [JsonPropertyName("baseline")]
         public JsonElement? Baseline { get; set; }
+
+        [JsonPropertyName("openalex_data")]
+        public JsonElement? OpenAlexData { get; set; }
     }
 
     public class InCitesUnitResult
