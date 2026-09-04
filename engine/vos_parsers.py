@@ -427,39 +427,64 @@ def parse_openalex_json(filepath: str) -> List[Dict[str, Any]]:
         author_orcids = []
         organizations = []
         countries = []
-        for auth in item.get('authorships', []) or []:
-            a_obj = auth.get('author', {}) or {}
-            a_name = a_obj.get('display_name')
-            if a_name:
+
+        # Soporte para listas planas directas (TlachIA Metrics / ClickHouse)
+        for a_name in item.get('author_names', []) or []:
+            if isinstance(a_name, str) and a_name.strip():
                 authors.append(a_name.strip())
-            if a_obj.get('orcid'):
-                author_orcids.append(a_obj['orcid'].strip())
 
-            for inst in auth.get('institutions', []) or []:
-                i_name = inst.get('display_name')
-                if i_name and i_name not in organizations:
-                    organizations.append(i_name.strip())
-                c_code = inst.get('country_code')
-                if c_code and c_code not in countries:
-                    countries.append(c_code.strip())
+        for inst_name in item.get('institution_names', []) or []:
+            if isinstance(inst_name, str) and inst_name.strip() and inst_name.strip() not in organizations:
+                organizations.append(inst_name.strip())
 
-            for c_val in auth.get('countries', []) or []:
-                if c_val and c_val not in countries:
-                    countries.append(c_val.strip())
+        for c_code in (item.get('country_codes') or item.get('all_country_codes') or []):
+            if isinstance(c_code, str) and c_code.strip() and c_code.strip() not in countries:
+                countries.append(c_code.strip())
+
+        # Soporte para estructura anidada OpenAlex REST API
+        for auth in item.get('authorships', []) or []:
+            if isinstance(auth, dict):
+                a_obj = auth.get('author', {}) or {}
+                a_name = a_obj.get('display_name')
+                if a_name and a_name.strip() not in authors:
+                    authors.append(a_name.strip())
+                if a_obj.get('orcid'):
+                    author_orcids.append(a_obj['orcid'].strip())
+
+                for inst in auth.get('institutions', []) or []:
+                    if isinstance(inst, dict):
+                        i_name = inst.get('display_name')
+                        if i_name and i_name not in organizations:
+                            organizations.append(i_name.strip())
+                        c_code = inst.get('country_code')
+                        if c_code and c_code not in countries:
+                            countries.append(c_code.strip())
+
+                for c_val in auth.get('countries', []) or []:
+                    if c_val and c_val not in countries:
+                        countries.append(c_val.strip())
+            elif isinstance(auth, str) and auth.strip() and auth.strip() not in authors:
+                authors.append(auth.strip())
 
         # Keywords
         author_keywords = []
         for kw in item.get('keywords', []) or []:
-            k_name = kw.get('display_name') if isinstance(kw, dict) else (kw.get('keyword') if isinstance(kw, dict) else str(kw))
-            if k_name:
+            if isinstance(kw, dict):
+                k_name = kw.get('display_name') or kw.get('keyword') or ''
+            else:
+                k_name = str(kw)
+            if k_name and k_name.strip():
                 author_keywords.append(k_name.strip())
 
         # Concepts
         concepts = []
         for concept in item.get('concepts', []) or []:
-            c_name = concept.get('display_name')
-            if c_name and concept.get('score', 0) > 0.25:
-                concepts.append(c_name.strip())
+            if isinstance(concept, dict):
+                c_name = concept.get('display_name')
+                if c_name and concept.get('score', 0) > 0.25:
+                    concepts.append(c_name.strip())
+            elif isinstance(concept, str) and concept.strip():
+                concepts.append(concept.strip())
 
         keywords = list(dict.fromkeys(author_keywords + concepts))
 
@@ -468,21 +493,44 @@ def parse_openalex_json(filepath: str) -> List[Dict[str, Any]]:
         subfields = []
         fields = []
         domains = []
+
+        # Soporte para campos planos directos (TlachIA Metrics / ClickHouse)
+        if item.get('topic') and isinstance(item.get('topic'), str) and item['topic'].strip():
+            topics.append(item['topic'].strip())
+        if item.get('subfield') and isinstance(item.get('subfield'), str) and item['subfield'].strip():
+            subfields.append(item['subfield'].strip())
+        if item.get('field') and isinstance(item.get('field'), str) and item['field'].strip():
+            fields.append(item['field'].strip())
+        if item.get('domain') and isinstance(item.get('domain'), str) and item['domain'].strip():
+            domains.append(item['domain'].strip())
+
+        # Soporte para estructura anidada OpenAlex REST API
         for top in item.get('topics', []) or []:
-            t_name = top.get('display_name')
-            if t_name: topics.append(t_name.strip())
-            sub = top.get('subfield', {}).get('display_name') if isinstance(top.get('subfield'), dict) else None
-            if sub: subfields.append(sub.strip())
-            fld = top.get('field', {}).get('display_name') if isinstance(top.get('field'), dict) else None
-            if fld: fields.append(fld.strip())
-            dom = top.get('domain', {}).get('display_name') if isinstance(top.get('domain'), dict) else None
-            if dom: domains.append(dom.strip())
+            if isinstance(top, dict):
+                t_name = top.get('display_name')
+                if t_name and t_name not in topics:
+                    topics.append(t_name.strip())
+                sub = top.get('subfield', {}).get('display_name') if isinstance(top.get('subfield'), dict) else None
+                if sub and sub not in subfields:
+                    subfields.append(sub.strip())
+                fld = top.get('field', {}).get('display_name') if isinstance(top.get('field'), dict) else None
+                if fld and fld not in fields:
+                    fields.append(fld.strip())
+                dom = top.get('domain', {}).get('display_name') if isinstance(top.get('domain'), dict) else None
+                if dom and dom not in domains:
+                    domains.append(dom.strip())
+            elif isinstance(top, str) and top.strip() and top.strip() not in topics:
+                topics.append(top.strip())
 
         # Source / Journal
         source = ''
+        if item.get('source_name'):
+            source = str(item['source_name']).strip()
+        elif item.get('source_id'):
+            source = str(item['source_id']).strip()
         prim_loc = item.get('primary_location') or {}
         if isinstance(prim_loc, dict):
-            source = prim_loc.get('source', {}).get('display_name', '') or ''
+            source = prim_loc.get('source', {}).get('display_name', '') or source
 
         # Funders
         funders = []
